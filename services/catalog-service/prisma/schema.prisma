@@ -1,0 +1,127 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+  schemas  = ["catalog"]
+}
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["multiSchema"]
+}
+
+model Category {
+  id          String     @id @default(uuid()) @db.Uuid
+  name        String     @db.VarChar(100)
+  slug        String     @unique @db.VarChar(120)
+  description String?    @db.Text
+  parentId    String?    @map("parent_id") @db.Uuid
+  isActive    Boolean    @default(true) @map("is_active")
+  createdAt   DateTime   @default(now()) @map("created_at")
+  updatedAt   DateTime   @updatedAt @map("updated_at")
+
+  parent   Category?  @relation("CategoryHierarchy", fields: [parentId], references: [id])
+  children Category[] @relation("CategoryHierarchy")
+  products Product[]
+
+  @@map("categories")
+  @@schema("catalog")
+}
+
+model Brand {
+  id        String    @id @default(uuid()) @db.Uuid
+  name      String    @unique @db.VarChar(100)
+  slug      String    @unique @db.VarChar(120)
+  logoUrl   String?   @map("logo_url") @db.VarChar(500)
+  createdAt DateTime  @default(now()) @map("created_at")
+  products  Product[]
+
+  @@map("brands")
+  @@schema("catalog")
+}
+
+model Product {
+  id             String           @id @default(uuid()) @db.Uuid
+  categoryId     String           @map("category_id") @db.Uuid
+  brandId        String?          @map("brand_id") @db.Uuid
+  name           String           @db.VarChar(255)
+  slug           String           @unique @db.VarChar(300)
+  description    String?          @db.Text
+  hsnCode        String           @map("hsn_code") @db.VarChar(10)
+  gstRate        Decimal          @map("gst_rate") @db.Decimal(5, 2)
+  isActive       Boolean          @default(true) @map("is_active")
+  attributes     Json             @default("{}")
+  createdAt      DateTime         @default(now()) @map("created_at")
+  updatedAt      DateTime         @updatedAt @map("updated_at")
+
+  category Category         @relation(fields: [categoryId], references: [id])
+  brand    Brand?           @relation(fields: [brandId], references: [id])
+  variants ProductVariant[]
+
+  @@index([categoryId])
+  @@index([brandId])
+  @@map("products")
+  @@schema("catalog")
+}
+
+model ProductVariant {
+  id             String      @id @default(uuid()) @db.Uuid
+  productId      String      @map("product_id") @db.Uuid
+  sku            String      @unique @db.VarChar(100)
+  title          String      @db.VarChar(200)
+  mrp            Decimal     @db.Decimal(10, 2)
+  sellingPrice   Decimal     @map("selling_price") @db.Decimal(10, 2)
+  weightGrams    Int         @map("weight_grams")
+  lengthCm       Decimal?    @map("length_cm") @db.Decimal(6, 2)
+  widthCm        Decimal?    @map("width_cm") @db.Decimal(6, 2)
+  heightCm       Decimal?    @map("height_cm") @db.Decimal(6, 2)
+  variantOptions Json        @default("{}") @map("variant_options")
+  images         Json        @default("[]")
+  createdAt      DateTime    @default(now()) @map("created_at")
+  updatedAt      DateTime    @updatedAt @map("updated_at")
+
+  product   Product    @relation(fields: [productId], references: [id], onDelete: Cascade)
+  inventory Inventory?
+
+  @@index([productId])
+  @@map("product_variants")
+  @@schema("catalog")
+}
+
+model Inventory {
+  id               String   @id @default(uuid()) @db.Uuid
+  variantId        String   @unique @map("variant_id") @db.Uuid
+  stockQuantity    Int      @default(0) @map("stock_quantity")
+  reservedQuantity Int      @default(0) @map("reserved_quantity")
+  version          Int      @default(1)
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  variant ProductVariant @relation(fields: [variantId], references: [id], onDelete: Cascade)
+
+  @@map("inventory")
+  @@schema("catalog")
+}
+
+enum ReservationStatus {
+  ACTIVE
+  FULFILLED
+  RELEASED
+  EXPIRED
+
+  @@schema("catalog")
+}
+
+model InventoryReservation {
+  id               String            @id @default(uuid()) @db.Uuid
+  reservationToken String            @unique @map("reservation_token") @db.VarChar(100)
+  variantId        String            @map("variant_id") @db.Uuid
+  quantity         Int
+  status           ReservationStatus @default(ACTIVE)
+  expiresAt        DateTime          @map("expires_at")
+  createdAt        DateTime          @default(now()) @map("created_at")
+  updatedAt        DateTime          @updatedAt @map("updated_at")
+
+  @@index([variantId])
+  @@index([expiresAt])
+  @@map("inventory_reservations")
+  @@schema("catalog")
+}

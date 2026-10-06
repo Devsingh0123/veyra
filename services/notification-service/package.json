@@ -1,0 +1,22 @@
+{
+  "name": "@veyra/notification-service",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "main": "src/server.js",
+  "scripts": {
+    "dev": "node --watch src/server.js",
+    "start": "node src/server.js",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "cors": "^2.8.5",
+    "pino": "^9.6.0",
+    "pino-http": "^10.4.0",
+    "zod": "^3.24.2",
+    "ioredis": "^5.5.0",
+    "bullmq": "^5.41.6",
+    "nodemailer": "^6.10.0"
+  }
+}

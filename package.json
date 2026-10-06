@@ -1,0 +1,28 @@
+{
+  "name": "veyra-monorepo",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Veyra — Production-Grade Indian E-Commerce Platform",
+  "workspaces": [
+    "storefront",
+    "admin",
+    "services/*"
+  ],
+  "scripts": {
+    "dev:gateway": "npm --workspace=services/api-gateway run dev",
+    "dev:auth": "npm --workspace=services/auth-service run dev",
+    "dev:catalog": "npm --workspace=services/catalog-service run dev",
+    "dev:cart": "npm --workspace=services/cart-service run dev",
+    "dev:order": "npm --workspace=services/order-service run dev",
+    "dev:payment": "npm --workspace=services/payment-service run dev",
+    "dev:notification": "npm --workspace=services/notification-service run dev",
+    "dev:storefront": "npm --workspace=storefront run dev",
+    "dev:admin": "npm --workspace=admin run dev"
+  },
+  "engines": {
+    "node": ">=20.0.0",
+    "npm": ">=10.0.0"
+  },
+  "author": "Veyra Engineering",
+  "license": "UNLICENSED"
+}
