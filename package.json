@@ -4,8 +4,6 @@
   "private": true,
   "description": "Veyra — Production-Grade Indian E-Commerce Platform",
   "workspaces": [
-    "storefront",
-    "admin",
     "services/*"
   ],
   "scripts": {
@@ -16,8 +14,8 @@
     "dev:order": "npm --workspace=services/order-service run dev",
     "dev:payment": "npm --workspace=services/payment-service run dev",
     "dev:notification": "npm --workspace=services/notification-service run dev",
-    "dev:storefront": "npm --workspace=storefront run dev",
-    "dev:admin": "npm --workspace=admin run dev"
+    "dev:storefront": "npm --prefix storefront run dev",
+    "dev:admin": "npm --prefix admin run dev"
   },
   "engines": {
     "node": ">=20.0.0",
