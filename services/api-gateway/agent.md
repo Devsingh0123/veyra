@@ -39,7 +39,7 @@ services/api-gateway/
 | `/api/v1/catalog/*`| `@veyra/catalog-service`| 3002 | CONFIGURED 🚀 |
 | `/api/v1/cart/*` | `@veyra/cart-service` | 3003 | CONFIGURED 🚀 |
 | `/api/v1/orders/*` | `@veyra/order-service`| 3004 | CONFIGURED 🚀 |
-| `/api/v1/payments/*`| `@veyra/payment-service`| 3005 | PENDING (Phase 6) |
+| `/api/v1/payments/*`| `@veyra/payment-service`| 3005 | CONFIGURED 🚀 |
 
 ---
 
@@ -76,12 +76,13 @@ ADMIN_URL=http://localhost:5174
 - [x] **Done:** Enabled `/api/v1/catalog/*` proxy pointing to `:3002`.
 - [x] **Done:** Enabled `/api/v1/cart/*` proxy pointing to `:3003`.
 - [x] **Done:** Enabled `/api/v1/orders/*` proxy pointing to `:3004`.
+- [x] **Done:** Enabled `/api/v1/payments/*` proxy pointing to `:3005`.
 - [ ] **Pending:** Install dependencies (`express-http-proxy`).
-- [ ] **Pending:** Enable `/api/v1/payments` proxy once Payment Service is ready.
 
 ---
 
 ## 6. CHANGELOG & UPDATES
+- **2026-10-06:** Enabled `/api/v1/payments/*` proxy routing to Payment Service `:3005`.
 - **2026-10-06:** Enabled `/api/v1/orders/*` proxy routing to Order Service `:3004`.
 - **2026-10-06:** Enabled `/api/v1/cart/*` proxy routing to Cart Service `:3003`.
 - **2026-10-06:** Enabled `/api/v1/catalog/*` proxy routing to Catalog Service `:3002`.

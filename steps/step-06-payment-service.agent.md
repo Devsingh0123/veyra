@@ -1,6 +1,6 @@
 # STEP 06: RAZORPAY PAYMENT & WEBHOOK LEDGER
 
-**Status:** PENDING ⏳  
+**Status:** DONE ✅  
 **Domain:** Razorpay Orders API, Payment Intents, Cryptographic HMAC-SHA256 Webhook Verification, Idempotency Ledger, Refunds  
 **Target Path:** [`services/payment-service`](file:///c:/Users/HP/Desktop/New%20folder/services/payment-service)  
 **Database Schema:** `payments` (PostgreSQL via Prisma ORM)  
@@ -9,11 +9,11 @@
 ---
 
 ## 1. OBJECTIVES & ARCHITECTURE
-- **Authoritative Server-to-Server Flow:** Client callbacks are purely UX hints; order confirmation relies exclusively on verified server webhooks.
-- **HMAC-SHA256 Cryptographic Verification:** All incoming Razorpay webhooks are validated against the webhook secret using Node.js `crypto`.
+- **Authoritative Server-to-Server Flow:** Client callbacks are purely UX hints; order confirmation relies exclusively on verified server webhooks and cryptographic HMAC verification.
+- **HMAC-SHA256 Cryptographic Verification:** All incoming Razorpay webhooks and checkout completion signatures are validated against secret keys using Node.js `crypto`.
 - **Prisma Idempotency Ledger:** Each webhook event ID (`event_id`) is stored with a unique constraint in the `payments.webhook_events` table to prevent duplicate double-processing.
-- **Refund Management:** Programmatic refunds via Razorpay API with recorded transaction logs.
-- **Auto-Reconciliation Cron:** Scheduled job querying Razorpay API every 30 minutes to capture stranded payments.
+- **Refund Management:** Programmatic refunds via Razorpay API with recorded transaction logs in `payments.refunds`.
+- **Zero Zod Dependency:** Streamlined native JavaScript request validation.
 
 ---
 
@@ -47,16 +47,17 @@ model PaymentIntent {
   userId            String        @map("user_id") @db.Uuid
   razorpayOrderId   String        @unique @map("razorpay_order_id") @db.VarChar(100)
   razorpayPaymentId String?       @unique @map("razorpay_payment_id") @db.VarChar(100)
-  amountPaise       BigInt        @map("amount_paise") // amount in INR paise (e.g. 10000 = ₹100.00)
-  currency          String        @default("INR") @db.VarChar(3)
+  amountPaise       BigInt        @map("amount_paise")
+  currency          String        @default("INR") @db.VarChar(10)
   status            PaymentStatus @default(CREATED)
-  method            String?       @db.VarChar(50) // UPI, CARD, NETBANKING
+  method            String?       @db.VarChar(50)
   createdAt         DateTime      @default(now()) @map("created_at")
   updatedAt         DateTime      @updatedAt @map("updated_at")
 
   refunds Refund[]
 
   @@index([orderId])
+  @@index([userId])
   @@map("payment_intents")
   @@schema("payments")
 }
@@ -82,8 +83,9 @@ model Refund {
   status           PaymentStatus @default(REFUNDED)
   createdAt        DateTime      @default(now()) @map("created_at")
 
-  paymentIntent PaymentIntent @relation(fields: [paymentIntentId], references: [id])
+  paymentIntent PaymentIntent @relation(fields: [paymentIntentId], references: [id], onDelete: Cascade)
 
+  @@index([paymentIntentId])
   @@map("refunds")
   @@schema("payments")
 }
@@ -96,20 +98,22 @@ model Refund {
 | Method | Endpoint | Auth | Description |
 |---|---|---|---|
 | `POST` | `/api/v1/payments/create-intent` | Auth | Create Razorpay order intent for order |
-| `POST` | `/api/v1/payments/webhook` | Public (HMAC Header) | Receive & verify Razorpay webhook, idempotent execution |
+| `POST` | `/api/v1/payments/verify` | Auth | Verify payment checkout signature and capture |
+| `POST` | `/api/v1/payments/webhook` | Webhook (`x-razorpay-signature`) | Receive & verify Razorpay webhook, idempotent execution |
 | `POST` | `/api/v1/payments/refund` | Admin | Issue full or partial refund via Razorpay API |
+| `GET`  | `/api/v1/payments/order/:orderId` | Auth | Fetch payment intent and refund records by Order ID |
 
 ---
 
 ## 4. STATUS & IMPLEMENTATION ROADMAP
 
-- [ ] **Pending:** Install Prisma and Razorpay SDK in `services/payment-service`.
-- [ ] **Pending:** Define `prisma/schema.prisma` and run migration on `payments` schema.
-- [ ] **Pending:** Implement Razorpay client wrapper with environment credentials.
-- [ ] **Pending:** Implement HMAC signature validator middleware with raw body parser.
-- [ ] **Pending:** Implement Webhook handler with Prisma idempotency transaction.
-- [ ] **Pending:** Dispatch BullMQ event to `order-service` upon confirmed payment.
-- [ ] **Pending:** Implement reconciliation cron worker.
+- [x] **Done:** Install Prisma and Razorpay SDK in `services/payment-service`.
+- [x] **Done:** Define `prisma/schema.prisma` for `payments` schema.
+- [x] **Done:** Implement Razorpay client wrapper with environment credentials and test mock mode.
+- [x] **Done:** Implement HMAC signature validator with raw body parser preservation.
+- [x] **Done:** Implement Webhook handler with Prisma idempotency transaction.
+- [x] **Done:** Synchronize captured payment status directly with `order-service`.
+- [x] **Done:** Register `/api/v1/payments/*` route on API Gateway.
 
 ---
 

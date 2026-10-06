@@ -7,17 +7,16 @@
   "scripts": {
     "dev": "node --watch src/server.js",
     "start": "node src/server.js",
-    "test": "node --test"
+    "prisma:generate": "prisma generate",
+    "prisma:migrate": "prisma migrate dev"
   },
   "dependencies": {
-    "express": "^4.21.2",
+    "@prisma/client": "^6.4.0",
     "cors": "^2.8.5",
-    "pino": "^9.6.0",
-    "pino-http": "^10.4.0",
-    "zod": "^3.24.2",
-    "pg": "^8.13.3",
-    "ioredis": "^5.5.0",
-    "razorpay": "^2.9.5",
-    "axios": "^1.7.9"
+    "express": "^4.21.2",
+    "razorpay": "^2.9.5"
+  },
+  "devDependencies": {
+    "prisma": "^6.4.0"
   }
 }

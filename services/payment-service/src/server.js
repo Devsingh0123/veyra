@@ -1,33 +1,71 @@
 import express from 'express';
 import cors from 'cors';
-import { env } from './config/env.js';
-import { logger } from './utils/logger.js';
+import { existsSync } from 'fs';
+import { resolve } from 'path';
+import paymentRoutes from './routes/payment.routes.js';
+import prisma from './prisma.js';
+
+// Load .env natively
+const envPath = resolve(process.cwd(), '.env');
+if (existsSync(envPath) && typeof process.loadEnvFile === 'function') {
+  process.loadEnvFile(envPath);
+}
+
+const PORT = process.env.PORT || 3005;
+const STOREFRONT_URL = process.env.STOREFRONT_URL || 'http://localhost:5173';
+const ADMIN_URL = process.env.ADMIN_URL || 'http://localhost:5174';
 
 const app = express();
 
 app.use(cors({
-  origin: [env.STOREFRONT_URL, env.ADMIN_URL],
+  origin: [STOREFRONT_URL, ADMIN_URL],
   credentials: true
 }));
-app.use(express.json());
 
-// Standard healthcheck endpoint
+// Preserve raw body buffer for Razorpay cryptographic webhook verification
+app.use(express.json({
+  verify: (req, res, buf) => {
+    req.rawBody = buf;
+  }
+}));
+
+// Healthcheck
 app.get('/health', (req, res) => {
-  res.status(200).json({
+  res.json({
     status: 'healthy',
-    service: env.SERVICE_NAME,
+    service: 'payment-service',
     timestamp: new Date().toISOString()
   });
 });
 
-const server = app.listen(env.PORT, () => {
-  logger.info(`Service ${env.SERVICE_NAME} listening on port ${env.PORT}`);
+// Domain routes
+app.use('/api/v1/payments', paymentRoutes);
+
+// 404
+app.use((req, res) => {
+  res.status(404).json({ success: false, error: 'Route not found' });
 });
 
-process.on('SIGTERM', () => {
-  logger.info('SIGTERM signal received. Closing HTTP server...');
-  server.close(() => {
-    logger.info('HTTP server closed.');
+// Central Error Handler
+app.use((err, req, res, next) => {
+  console.error('Payment Service Error:', err);
+  res.status(500).json({ success: false, error: err.message || 'Internal Server Error' });
+});
+
+const server = app.listen(PORT, () => {
+  console.log(`[Payment Service] Running on http://localhost:${PORT}`);
+});
+
+process.on('SIGTERM', async () => {
+  server.close(async () => {
+    await prisma.$disconnect();
+    process.exit(0);
+  });
+});
+
+process.on('SIGINT', async () => {
+  server.close(async () => {
+    await prisma.$disconnect();
     process.exit(0);
   });
 });

@@ -100,8 +100,19 @@ app.use('/api/v1/orders', proxy(ORDER_SERVICE_URL, {
   }
 }));
 
-// Future services (ready to enable as each service is completed):
-// app.use('/api/v1/payments', proxy(PAYMENT_SERVICE_URL, { proxyReqPathResolver: (req) => `/api/v1/payments${req.url}` }));
+// 5. Payment Service (:3005)
+app.use('/api/v1/payments', proxy(PAYMENT_SERVICE_URL, {
+  proxyReqPathResolver: (req) => `/api/v1/payments${req.url}`,
+  proxyErrorHandler: (err, res, next) => {
+    res.status(503).json({
+      success: false,
+      error: {
+        code: 'SERVICE_UNAVAILABLE',
+        message: 'Payment Service is currently unreachable. Please try again shortly.'
+      }
+    });
+  }
+}));
 
 // 404 for unrouted requests
 app.use((req, res) => {
@@ -120,4 +131,5 @@ app.listen(PORT, () => {
   console.log(`[API Gateway] Proxying /api/v1/catalog/* -> ${CATALOG_SERVICE_URL}`);
   console.log(`[API Gateway] Proxying /api/v1/cart/* -> ${CART_SERVICE_URL}`);
   console.log(`[API Gateway] Proxying /api/v1/orders/* -> ${ORDER_SERVICE_URL}`);
+  console.log(`[API Gateway] Proxying /api/v1/payments/* -> ${PAYMENT_SERVICE_URL}`);
 });
