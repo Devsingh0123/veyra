@@ -22,7 +22,14 @@ router.get('/:id/invoice/html', orderController.getInvoiceHtml);
 // 5. Logistics Tracking
 router.get('/:id/shipment', orderController.getShipment);
 
-// 6. Admin order & dispatch operations
+// 6. Returns & Reverse Logistics
+router.post('/:id/return', orderController.fileReturn);
+router.get('/returns/all', orderController.listReturns);
+router.get('/returns/:returnId', orderController.getReturnById);
+router.patch('/admin/returns/:returnId/status', orderController.updateReturnStatus);
+router.get('/returns/:returnId/credit-note/html', orderController.getCreditNoteHtml);
+
+// 7. Admin order & dispatch operations
 router.get('/admin/all', orderController.listAllOrders);
 router.patch('/admin/:id/status', orderController.updateStatus);
 router.post('/admin/:id/shipment', orderController.createShipment);

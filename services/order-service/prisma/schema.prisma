@@ -44,35 +44,49 @@ enum PaymentStatus {
   @@schema("orders")
 }
 
+enum ReturnStatus {
+  REQUESTED
+  APPROVED
+  REJECTED
+  PICKUP_SCHEDULED
+  RECEIVED_AT_WAREHOUSE
+  INSPECTED_PASSED
+  INSPECTED_REJECTED
+  REFUNDED
+
+  @@schema("orders")
+}
+
 model Order {
-  id                 String        @id @default(uuid()) @db.Uuid
-  orderNumber        String        @unique @map("order_number") @db.VarChar(50)
-  userId             String        @map("user_id") @db.Uuid
-  status             OrderStatus   @default(PENDING)
-  paymentMethod      PaymentMethod @map("payment_method")
-  paymentStatus      PaymentStatus @default(PENDING) @map("payment_status")
-  currency           String        @default("INR") @db.VarChar(10)
-  subtotal           Decimal       @db.Decimal(10, 2)
-  discountAmount     Decimal       @default(0) @map("discount_amount") @db.Decimal(10, 2)
-  shippingFee        Decimal       @default(0) @map("shipping_fee") @db.Decimal(10, 2)
-  codFee             Decimal       @default(0) @map("cod_fee") @db.Decimal(10, 2)
-  taxAmount          Decimal       @map("tax_amount") @db.Decimal(10, 2)
-  cgstAmount         Decimal       @default(0) @map("cgst_amount") @db.Decimal(10, 2)
-  sgstAmount         Decimal       @default(0) @map("sgst_amount") @db.Decimal(10, 2)
-  igstAmount         Decimal       @default(0) @map("igst_amount") @db.Decimal(10, 2)
-  totalAmount        Decimal       @map("total_amount") @db.Decimal(10, 2)
-  couponCode         String?       @map("coupon_code") @db.VarChar(50)
-  shippingAddress    Json          @map("shipping_address")
-  billingAddress     Json          @map("billing_address")
-  cancellationReason String?       @map("cancellation_reason") @db.Text
-  cancelledAt        DateTime?     @map("cancelled_at")
-  createdAt          DateTime      @default(now()) @map("created_at")
-  updatedAt          DateTime      @updatedAt @map("updated_at")
+  id                 String         @id @default(uuid()) @db.Uuid
+  orderNumber        String         @unique @map("order_number") @db.VarChar(50)
+  userId             String         @map("user_id") @db.Uuid
+  status             OrderStatus    @default(PENDING)
+  paymentMethod      PaymentMethod  @map("payment_method")
+  paymentStatus      PaymentStatus  @default(PENDING) @map("payment_status")
+  currency           String         @default("INR") @db.VarChar(10)
+  subtotal           Decimal        @db.Decimal(10, 2)
+  discountAmount     Decimal        @default(0) @map("discount_amount") @db.Decimal(10, 2)
+  shippingFee        Decimal        @default(0) @map("shipping_fee") @db.Decimal(10, 2)
+  codFee             Decimal        @default(0) @map("cod_fee") @db.Decimal(10, 2)
+  taxAmount          Decimal        @map("tax_amount") @db.Decimal(10, 2)
+  cgstAmount         Decimal        @default(0) @map("cgst_amount") @db.Decimal(10, 2)
+  sgstAmount         Decimal        @default(0) @map("sgst_amount") @db.Decimal(10, 2)
+  igstAmount         Decimal        @default(0) @map("igst_amount") @db.Decimal(10, 2)
+  totalAmount        Decimal        @map("total_amount") @db.Decimal(10, 2)
+  couponCode         String?        @map("coupon_code") @db.VarChar(50)
+  shippingAddress    Json           @map("shipping_address")
+  billingAddress     Json           @map("billing_address")
+  cancellationReason String?        @map("cancellation_reason") @db.Text
+  cancelledAt        DateTime?      @map("cancelled_at")
+  createdAt          DateTime       @default(now()) @map("created_at")
+  updatedAt          DateTime       @updatedAt @map("updated_at")
 
   items    OrderItem[]
   history  OrderHistory[]
   invoice  TaxInvoice?
   shipment Shipment?
+  returns  ReturnRequest[]
 
   @@index([userId])
   @@index([status])
@@ -188,5 +202,52 @@ model Shipment {
 
   @@index([awbNumber])
   @@map("shipments")
+  @@schema("orders")
+}
+
+model ReturnRequest {
+  id           String       @id @default(uuid()) @db.Uuid
+  orderId      String       @map("order_id") @db.Uuid
+  userId       String       @map("user_id") @db.Uuid
+  reason       String       @db.VarChar(100)
+  comments     String?      @db.Text
+  images       Json         @default("[]")
+  status       ReturnStatus @default(REQUESTED)
+  refundAmount Decimal      @map("refund_amount") @db.Decimal(10, 2)
+  adminNote    String?      @map("admin_note") @db.Text
+  createdAt    DateTime     @default(now()) @map("created_at")
+  updatedAt    DateTime     @updatedAt @map("updated_at")
+
+  order      Order       @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  creditNote CreditNote?
+
+  @@index([orderId])
+  @@index([userId])
+  @@map("return_requests")
+  @@schema("orders")
+}
+
+model CreditNote {
+  id                String   @id @default(uuid()) @db.Uuid
+  returnRequestId   String   @unique @map("return_request_id") @db.Uuid
+  creditNoteNumber  String   @unique @map("credit_note_number") @db.VarChar(50)
+  originalInvoiceNo String   @map("original_invoice_no") @db.VarChar(50)
+  totalRefundGst    Decimal  @map("total_refund_gst") @db.Decimal(10, 2)
+  totalRefundValue  Decimal  @map("total_refund_value") @db.Decimal(10, 2)
+  createdAt         DateTime @default(now()) @map("created_at")
+
+  returnRequest ReturnRequest @relation(fields: [returnRequestId], references: [id], onDelete: Cascade)
+
+  @@map("credit_notes")
+  @@schema("orders")
+}
+
+model CreditNoteSequence {
+  id            String   @id @default(uuid()) @db.Uuid
+  financialYear String   @unique @map("financial_year") @db.VarChar(10)
+  currentNumber Int      @default(0) @map("current_number")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  @@map("credit_note_sequences")
   @@schema("orders")
 }

@@ -1,6 +1,7 @@
 import { orderService } from '../services/order.service.js';
 import { invoiceService } from '../services/invoice.service.js';
 import { logisticsService } from '../services/logistics.service.js';
+import { returnService } from '../services/return.service.js';
 
 export const orderController = {
   /**
@@ -266,6 +267,122 @@ export const orderController = {
       });
 
       return res.status(200).json({ success: true, data: result });
+    } catch (err) {
+      return res.status(400).json({ success: false, error: err.message });
+    }
+  },
+
+  /**
+   * POST /api/v1/orders/:id/return
+   * Customer files a return request (7-day window)
+   */
+  async fileReturn(req, res) {
+    try {
+      const { id } = req.params;
+      const userId = req.headers['x-user-id'] || req.body.userId;
+      const { reason, comments, images } = req.body;
+
+      if (!userId) {
+        return res.status(401).json({ success: false, error: 'Authentication required: userId missing' });
+      }
+
+      const returnRequest = await returnService.fileReturnRequest({
+        orderId: id,
+        userId,
+        reason,
+        comments,
+        images
+      });
+
+      return res.status(201).json({
+        success: true,
+        message: 'Return request filed successfully',
+        data: returnRequest
+      });
+    } catch (err) {
+      return res.status(400).json({ success: false, error: err.message });
+    }
+  },
+
+  /**
+   * GET /api/v1/orders/returns
+   * List return requests (Customer or Admin)
+   */
+  async listReturns(req, res) {
+    try {
+      const userId = req.headers['x-user-id'] || req.query.userId;
+      const userRole = req.headers['x-user-role'];
+      const { page, limit, status } = req.query;
+
+      const checkUserId = userRole === 'ADMIN' ? null : userId;
+      const result = await returnService.listReturns({
+        userId: checkUserId,
+        page,
+        limit,
+        status
+      });
+
+      return res.status(200).json({ success: true, data: result });
+    } catch (err) {
+      return res.status(500).json({ success: false, error: err.message });
+    }
+  },
+
+  /**
+   * GET /api/v1/orders/returns/:returnId
+   * Get return request details
+   */
+  async getReturnById(req, res) {
+    try {
+      const { returnId } = req.params;
+      const returnReq = await returnService.getReturnById(returnId);
+
+      return res.status(200).json({ success: true, data: returnReq });
+    } catch (err) {
+      return res.status(404).json({ success: false, error: err.message });
+    }
+  },
+
+  /**
+   * PATCH /api/v1/orders/admin/returns/:returnId/status
+   * Advance return inspection status & issue Credit Note / Refund (Admin)
+   */
+  async updateReturnStatus(req, res) {
+    try {
+      const { returnId } = req.params;
+      const { status, adminNote } = req.body;
+      const actorRole = req.headers['x-user-role'] || 'ADMIN';
+
+      if (!status) {
+        return res.status(400).json({ success: false, error: 'Next status is required' });
+      }
+
+      const updated = await returnService.updateReturnStatus(returnId, status, {
+        adminNote,
+        actorRole
+      });
+
+      return res.status(200).json({
+        success: true,
+        message: `Return request transitioned to ${status}`,
+        data: updated
+      });
+    } catch (err) {
+      return res.status(400).json({ success: false, error: err.message });
+    }
+  },
+
+  /**
+   * GET /api/v1/orders/returns/:returnId/credit-note/html
+   * View printable Section 34 CGST Credit Note HTML
+   */
+  async getCreditNoteHtml(req, res) {
+    try {
+      const { returnId } = req.params;
+      const html = await returnService.renderCreditNoteHtml(returnId);
+
+      res.setHeader('Content-Type', 'text/html');
+      return res.send(html);
     } catch (err) {
       return res.status(400).json({ success: false, error: err.message });
     }

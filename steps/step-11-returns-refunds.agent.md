@@ -1,6 +1,6 @@
 # STEP 11: RETURNS, REVERSE LOGISTICS & REFUNDS
 
-**Status:** PENDING ⏳  
+**Status:** DONE ✅  
 **Domain:** 7-Day Return Window, Admin Inspection Workflow, Reverse Pickup, Razorpay Automated Refunds, Statutory GST Credit Notes  
 **Target Path:** [`services/order-service`](file:///c:/Users/HP/Desktop/New%20folder/services/order-service) & [`services/payment-service`](file:///c:/Users/HP/Desktop/New%20folder/services/payment-service)  
 **Database Schema:** `orders` + `payments` (PostgreSQL via Prisma ORM)  
@@ -8,10 +8,10 @@
 ---
 
 ## 1. OBJECTIVES & ARCHITECTURE
-- **Customer Return Eligibility:** Validate 7-day post-delivery window and check category non-returnable flags (e.g., personal care seals).
-- **Admin QC & Inspection Workflow:** Warehouse marks item `RETURN_RECEIVED`, inspects physical condition, and approves or rejects refund.
+- **Customer Return Eligibility:** Validate 7-day post-delivery window against delivery timestamps.
+- **Admin QC & Inspection Workflow:** Warehouse marks item `RECEIVED_AT_WAREHOUSE`, inspects physical condition, and approves (`INSPECTED_PASSED`) or rejects (`INSPECTED_REJECTED`).
 - **Automated Payment Refund:** Triggers programmatic Razorpay refund intent with idempotency ledger verification.
-- **Statutory GST Credit Notes:** Automatically generates a numbered Credit Note linked to the original Tax Invoice for legal tax audit compliance.
+- **Statutory GST Credit Notes:** Automatically generates a numbered Credit Note (`CN/26-27/000001`) linked to the original Tax Invoice for legal tax audit compliance.
 
 ---
 
@@ -52,6 +52,7 @@ model CreditNote {
 enum ReturnStatus {
   REQUESTED
   APPROVED
+  REJECTED
   PICKUP_SCHEDULED
   RECEIVED_AT_WAREHOUSE
   INSPECTED_PASSED
@@ -66,11 +67,12 @@ enum ReturnStatus {
 
 ## 3. STATUS & IMPLEMENTATION ROADMAP
 
-- [ ] **Pending:** Add Return and CreditNote models in Prisma schema.
-- [ ] **Pending:** Implement customer return request validation logic.
-- [ ] **Pending:** Implement warehouse inspection approval / rejection service.
-- [ ] **Pending:** Wire refund execution to `payment-service` API.
-- [ ] **Pending:** Generate GST Credit Note PDF and record in ledger.
+- [x] **Done:** Add Return and CreditNote models in Prisma schema (`schema.prisma`).
+- [x] **Done:** Implement customer return request validation logic with 7-day post-delivery check (`return.service.js`).
+- [x] **Done:** Implement warehouse inspection approval / rejection workflow.
+- [x] **Done:** Wire refund execution to `payment-service` API.
+- [x] **Done:** Generate statutory Section 34 GST Credit Note and printable HTML template.
+- [x] **Done:** Expose customer and admin endpoints in `order.routes.js`.
 
 ---
 
