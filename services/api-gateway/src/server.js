@@ -86,8 +86,21 @@ app.use('/api/v1/cart', proxy(CART_SERVICE_URL, {
   }
 }));
 
+// 4. Order Service (:3004)
+app.use('/api/v1/orders', proxy(ORDER_SERVICE_URL, {
+  proxyReqPathResolver: (req) => `/api/v1/orders${req.url}`,
+  proxyErrorHandler: (err, res, next) => {
+    res.status(503).json({
+      success: false,
+      error: {
+        code: 'SERVICE_UNAVAILABLE',
+        message: 'Order Service is currently unreachable. Please try again shortly.'
+      }
+    });
+  }
+}));
+
 // Future services (ready to enable as each service is completed):
-// app.use('/api/v1/orders', proxy(ORDER_SERVICE_URL, { proxyReqPathResolver: (req) => `/api/v1/orders${req.url}` }));
 // app.use('/api/v1/payments', proxy(PAYMENT_SERVICE_URL, { proxyReqPathResolver: (req) => `/api/v1/payments${req.url}` }));
 
 // 404 for unrouted requests
@@ -106,4 +119,5 @@ app.listen(PORT, () => {
   console.log(`[API Gateway] Proxying /api/v1/auth/* -> ${AUTH_SERVICE_URL}`);
   console.log(`[API Gateway] Proxying /api/v1/catalog/* -> ${CATALOG_SERVICE_URL}`);
   console.log(`[API Gateway] Proxying /api/v1/cart/* -> ${CART_SERVICE_URL}`);
+  console.log(`[API Gateway] Proxying /api/v1/orders/* -> ${ORDER_SERVICE_URL}`);
 });

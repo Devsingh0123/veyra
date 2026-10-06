@@ -1,0 +1,135 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+  schemas  = ["orders"]
+}
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["multiSchema"]
+}
+
+enum OrderStatus {
+  PENDING
+  PAYMENT_PENDING
+  CONFIRMED
+  PROCESSING
+  PACKED
+  SHIPPED
+  OUT_FOR_DELIVERY
+  DELIVERED
+  CANCELLED
+  RTO_INITIATED
+  RTO_DELIVERED
+  RETURN_REQUESTED
+  RETURN_RECEIVED
+  REFUNDED
+
+  @@schema("orders")
+}
+
+enum PaymentMethod {
+  PREPAID
+  COD
+
+  @@schema("orders")
+}
+
+enum PaymentStatus {
+  PENDING
+  PAID
+  FAILED
+  REFUNDED
+
+  @@schema("orders")
+}
+
+model Order {
+  id                 String        @id @default(uuid()) @db.Uuid
+  orderNumber        String        @unique @map("order_number") @db.VarChar(50)
+  userId             String        @map("user_id") @db.Uuid
+  status             OrderStatus   @default(PENDING)
+  paymentMethod      PaymentMethod @map("payment_method")
+  paymentStatus      PaymentStatus @default(PENDING) @map("payment_status")
+  currency           String        @default("INR") @db.VarChar(10)
+  subtotal           Decimal       @db.Decimal(10, 2)
+  discountAmount     Decimal       @default(0) @map("discount_amount") @db.Decimal(10, 2)
+  shippingFee        Decimal       @default(0) @map("shipping_fee") @db.Decimal(10, 2)
+  codFee             Decimal       @default(0) @map("cod_fee") @db.Decimal(10, 2)
+  taxAmount          Decimal       @map("tax_amount") @db.Decimal(10, 2)
+  cgstAmount         Decimal       @default(0) @map("cgst_amount") @db.Decimal(10, 2)
+  sgstAmount         Decimal       @default(0) @map("sgst_amount") @db.Decimal(10, 2)
+  igstAmount         Decimal       @default(0) @map("igst_amount") @db.Decimal(10, 2)
+  totalAmount        Decimal       @map("total_amount") @db.Decimal(10, 2)
+  couponCode         String?       @map("coupon_code") @db.VarChar(50)
+  shippingAddress    Json          @map("shipping_address")
+  billingAddress     Json          @map("billing_address")
+  cancellationReason String?       @map("cancellation_reason") @db.Text
+  cancelledAt        DateTime?     @map("cancelled_at")
+  createdAt          DateTime      @default(now()) @map("created_at")
+  updatedAt          DateTime      @updatedAt @map("updated_at")
+
+  items   OrderItem[]
+  history OrderHistory[]
+
+  @@index([userId])
+  @@index([status])
+  @@map("orders")
+  @@schema("orders")
+}
+
+model OrderItem {
+  id             String   @id @default(uuid()) @db.Uuid
+  orderId        String   @map("order_id") @db.Uuid
+  productId      String?  @map("product_id") @db.Uuid
+  variantId      String   @map("variant_id") @db.Uuid
+  productTitle   String   @map("product_title") @db.VarChar(255)
+  variantTitle   String   @map("variant_title") @db.VarChar(200)
+  sku            String   @db.VarChar(100)
+  hsnCode        String   @map("hsn_code") @db.VarChar(20)
+  unitPrice      Decimal  @map("unit_price") @db.Decimal(10, 2)
+  quantity       Int
+  taxRate        Decimal  @map("tax_rate") @db.Decimal(5, 2)
+  taxAmount      Decimal  @map("tax_amount") @db.Decimal(10, 2)
+  totalPrice     Decimal  @map("total_price") @db.Decimal(10, 2)
+  itemAttributes Json     @default("{}") @map("item_attributes")
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId])
+  @@map("order_items")
+  @@schema("orders")
+}
+
+model OrderHistory {
+  id        String      @id @default(uuid()) @db.Uuid
+  orderId   String      @map("order_id") @db.Uuid
+  fromState OrderStatus @map("from_state")
+  toState   OrderStatus @map("to_state")
+  note      String?     @db.Text
+  actorRole String      @map("actor_role") @db.VarChar(50)
+  createdAt DateTime    @default(now()) @map("created_at")
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId])
+  @@map("order_history")
+  @@schema("orders")
+}
+
+model Coupon {
+  id                String    @id @default(uuid()) @db.Uuid
+  code              String    @unique @db.VarChar(50)
+  discountType      String    @map("discount_type") @db.VarChar(20)
+  discountValue     Decimal   @map("discount_value") @db.Decimal(10, 2)
+  minOrderAmount    Decimal   @default(0) @map("min_order_amount") @db.Decimal(10, 2)
+  maxDiscountAmount Decimal?  @map("max_discount_amount") @db.Decimal(10, 2)
+  usageLimit        Int?      @map("usage_limit")
+  usedCount         Int       @default(0) @map("used_count")
+  expiresAt         DateTime? @map("expires_at")
+  isActive          Boolean   @default(true) @map("is_active")
+  createdAt         DateTime  @default(now()) @map("created_at")
+
+  @@map("coupons")
+  @@schema("orders")
+}

@@ -1,6 +1,6 @@
 # STEP 07: ORDER LIFECYCLE & STATE MACHINE SERVICE
 
-**Status:** PENDING ⏳  
+**Status:** DONE ✅  
 **Domain:** Order Creation, Strict State Machine (FSM), Immutable Historical Snapshots, Address Management  
 **Target Path:** [`services/order-service`](file:///c:/Users/HP/Desktop/New%20folder/services/order-service)  
 **Database Schema:** `orders` (PostgreSQL via Prisma ORM)  
@@ -125,22 +125,26 @@ model OrderHistory {
 
 | Method | Endpoint | Auth | Description |
 |---|---|---|---|
-| `POST` | `/api/v1/orders` | Auth | Create draft order from validated cart quote |
+| `POST` | `/api/v1/orders/quote` | Public | Calculate live checkout quotation (tax, discount, COD) |
+| `POST` | `/api/v1/orders` | Auth | Create order with immutable item & address snapshot |
 | `GET` | `/api/v1/orders` | Auth | List authenticated customer's orders |
 | `GET` | `/api/v1/orders/:id` | Auth | Get order snapshot details and tracking status |
 | `PATCH`| `/api/v1/orders/:id/cancel` | Auth | Cancel order (only before PACKED/DISPATCHED) |
-| `PATCH`| `/api/v1/admin/orders/:id/status` | Admin | Advance order FSM state |
+| `GET`  | `/api/v1/orders/admin/all` | Admin | List all orders with filters and pagination |
+| `PATCH`| `/api/v1/orders/admin/:id/status` | Admin | Advance order FSM state |
 
 ---
 
 ## 4. STATUS & IMPLEMENTATION ROADMAP
 
-- [ ] **Pending:** Install Prisma in `services/order-service`.
-- [ ] **Pending:** Define `prisma/schema.prisma` and run migration on `orders` schema.
-- [ ] **Pending:** Implement Order FSM transition matrix engine (validates legal transitions).
-- [ ] **Pending:** Implement Order creation orchestrator with immutable snapshot generation.
-- [ ] **Pending:** Implement Order history audit logger.
-- [ ] **Pending:** Expose Customer and Admin Order endpoints.
+- [x] **Done:** Install Prisma in `services/order-service`.
+- [x] **Done:** Define `prisma/schema.prisma` for `orders` schema.
+- [x] **Done:** Implement Indian GST tax calculation engine (`gst.service.js`).
+- [x] **Done:** Implement Order FSM transition matrix engine (`fsm.service.js`).
+- [x] **Done:** Implement Order creation orchestrator with immutable snapshot generation (`order.service.js`).
+- [x] **Done:** Implement Order history audit logger.
+- [x] **Done:** Expose Customer and Admin Order endpoints without Zod (`order.controller.js`).
+- [x] **Done:** Register `/api/v1/orders/*` route in API Gateway.
 
 ---
 
