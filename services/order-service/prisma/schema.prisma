@@ -69,8 +69,10 @@ model Order {
   createdAt          DateTime      @default(now()) @map("created_at")
   updatedAt          DateTime      @updatedAt @map("updated_at")
 
-  items   OrderItem[]
-  history OrderHistory[]
+  items    OrderItem[]
+  history  OrderHistory[]
+  invoice  TaxInvoice?
+  shipment Shipment?
 
   @@index([userId])
   @@index([status])
@@ -131,5 +133,60 @@ model Coupon {
   createdAt         DateTime  @default(now()) @map("created_at")
 
   @@map("coupons")
+  @@schema("orders")
+}
+
+model TaxInvoice {
+  id            String   @id @default(uuid()) @db.Uuid
+  orderId       String   @unique @map("order_id") @db.Uuid
+  invoiceNumber String   @unique @map("invoice_number") @db.VarChar(50)
+  financialYear String   @map("financial_year") @db.VarChar(10)
+  invoiceDate   DateTime @default(now()) @map("invoice_date")
+  taxableAmount Decimal  @map("taxable_amount") @db.Decimal(10, 2)
+  cgstAmount    Decimal  @default(0) @map("cgst_amount") @db.Decimal(10, 2)
+  sgstAmount    Decimal  @default(0) @map("sgst_amount") @db.Decimal(10, 2)
+  igstAmount    Decimal  @default(0) @map("igst_amount") @db.Decimal(10, 2)
+  totalAmount   Decimal  @map("total_amount") @db.Decimal(10, 2)
+  pdfUrl        String?  @map("pdf_url") @db.VarChar(500)
+  sellerGstin   String   @default("07AABCV1234F1Z5") @map("seller_gstin") @db.VarChar(20)
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([financialYear])
+  @@map("tax_invoices")
+  @@schema("orders")
+}
+
+model InvoiceSequence {
+  id            String   @id @default(uuid()) @db.Uuid
+  financialYear String   @unique @map("financial_year") @db.VarChar(10)
+  currentNumber Int      @default(0) @map("current_number")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  @@map("invoice_sequences")
+  @@schema("orders")
+}
+
+model Shipment {
+  id              String    @id @default(uuid()) @db.Uuid
+  orderId         String    @unique @map("order_id") @db.Uuid
+  carrier         String    @default("MOCK") @db.VarChar(50)
+  awbNumber       String    @unique @map("awb_number") @db.VarChar(100)
+  labelUrl        String?   @map("label_url") @db.VarChar(500)
+  manifestUrl     String?   @map("manifest_url") @db.VarChar(500)
+  billableWeightG Int       @map("billable_weight_g")
+  ewayBillNumber  String?   @map("eway_bill_number") @db.VarChar(100)
+  currentStatus   String    @default("MANIFESTED") @map("current_status") @db.VarChar(50)
+  trackingHistory Json      @default("[]") @map("tracking_history")
+  dispatchedAt    DateTime? @map("dispatched_at")
+  deliveredAt     DateTime? @map("delivered_at")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([awbNumber])
+  @@map("shipments")
   @@schema("orders")
 }

@@ -1,4 +1,6 @@
 import { orderService } from '../services/order.service.js';
+import { invoiceService } from '../services/invoice.service.js';
+import { logisticsService } from '../services/logistics.service.js';
 
 export const orderController = {
   /**
@@ -96,7 +98,6 @@ export const orderController = {
       const userId = req.headers['x-user-id'] || req.query.userId;
       const userRole = req.headers['x-user-role'];
 
-      // If customer, verify ownership. If admin, allow viewing any order.
       const checkUserId = userRole === 'ADMIN' ? null : userId;
       const order = await orderService.getOrderById(id, checkUserId);
 
@@ -168,6 +169,105 @@ export const orderController = {
       return res.status(200).json({ success: true, data: result });
     } catch (err) {
       return res.status(500).json({ success: false, error: err.message });
+    }
+  },
+
+  /**
+   * GET /api/v1/orders/:id/invoice
+   * Get or generate Tax Invoice JSON data
+   */
+  async getInvoice(req, res) {
+    try {
+      const { id } = req.params;
+      const invoice = await invoiceService.generateInvoice(id);
+
+      return res.status(200).json({ success: true, data: invoice });
+    } catch (err) {
+      return res.status(400).json({ success: false, error: err.message });
+    }
+  },
+
+  /**
+   * GET /api/v1/orders/:id/invoice/html
+   * View printable Section 46 CGST HTML Tax Invoice
+   */
+  async getInvoiceHtml(req, res) {
+    try {
+      const { id } = req.params;
+      const html = await invoiceService.renderInvoiceHtml(id);
+
+      res.setHeader('Content-Type', 'text/html');
+      return res.send(html);
+    } catch (err) {
+      return res.status(400).json({ success: false, error: err.message });
+    }
+  },
+
+  /**
+   * POST /api/v1/orders/admin/:id/shipment
+   * Dispatch order and assign AWB (Admin)
+   */
+  async createShipment(req, res) {
+    try {
+      const { id } = req.params;
+      const { carrier, deadWeightGrams, lengthCm, widthCm, heightCm } = req.body;
+
+      const shipment = await logisticsService.createShipment({
+        orderId: id,
+        carrier,
+        deadWeightGrams,
+        lengthCm,
+        widthCm,
+        heightCm
+      });
+
+      return res.status(201).json({
+        success: true,
+        message: 'Order manifested and AWB assigned',
+        data: shipment
+      });
+    } catch (err) {
+      return res.status(400).json({ success: false, error: err.message });
+    }
+  },
+
+  /**
+   * GET /api/v1/orders/:id/shipment
+   * Get shipment tracking checkpoints
+   */
+  async getShipment(req, res) {
+    try {
+      const { id } = req.params;
+      const shipment = await logisticsService.getShipmentByOrderId(id);
+
+      return res.status(200).json({ success: true, data: shipment });
+    } catch (err) {
+      return res.status(404).json({ success: false, error: err.message });
+    }
+  },
+
+  /**
+   * POST /api/v1/orders/logistics/webhook
+   * Ingest carrier tracking webhook update
+   */
+  async handleLogisticsWebhook(req, res) {
+    try {
+      const { awbNumber, status, location, notes } = req.body;
+
+      if (!awbNumber || !status) {
+        return res.status(400).json({ success: false, error: 'awbNumber and status are required' });
+      }
+
+      const result = await logisticsService.handleTrackingWebhook({
+        awbNumber,
+        status,
+        location,
+        notes
+      });
+
+      return res.status(200).json({ success: true, data: result });
+    } catch (err) {
+      return res.status(400).json({ success: false, error: err.message });
     }
   }
 };
