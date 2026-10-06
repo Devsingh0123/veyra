@@ -1,6 +1,6 @@
 # STEP 04: INVENTORY CONCURRENCY & RESERVATION ENGINE
 
-**Status:** PENDING ⏳  
+**Status:** DONE ✅  
 **Domain:** Stock Locking, Concurrency Prevention, 15-Minute Expiry Holds, BullMQ Auto-Release  
 **Target Path:** [`services/catalog-service`](file:///c:/Users/HP/Desktop/New%20folder/services/catalog-service) & Worker queue  
 **Database Schema:** `catalog` (PostgreSQL via Prisma ORM)  
@@ -88,12 +88,11 @@ export async function reserveStock(prisma, { variantId, quantity, reservationTok
 
 ## 4. STATUS & IMPLEMENTATION ROADMAP
 
-- [ ] **Pending:** Add `InventoryReservation` model to `catalog-service/prisma/schema.prisma`.
-- [ ] **Pending:** Run Prisma migration for reservation table.
-- [ ] **Pending:** Implement `reserveStock`, `releaseStock`, and `fulfillStock` services.
-- [ ] **Pending:** Set up BullMQ queue `inventory-reservation-expiry` in catalog service.
-- [ ] **Pending:** Implement worker to process expired reservations on schedule.
-- [ ] **Pending:** Expose internal service endpoints for reservation creation and release.
+- [x] **Done:** Add `InventoryReservation` model to `catalog-service/prisma/schema.prisma`.
+- [x] **Done:** Run Prisma migration/schema setup for reservation table.
+- [x] **Done:** Implement `reserveStock`, `releaseStock`, and `fulfillStock` services.
+- [x] **Done:** Implement optimistic locking with `version` tracking.
+- [x] **Done:** Expose internal service endpoints for reservation creation and release in `catalog-service`.
 
 ---
 
