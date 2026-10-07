@@ -2,6 +2,11 @@ import React from 'react';
 import { createBrowserRouter, Link } from 'react-router-dom';
 import StorefrontLayout from '../components/layout/StorefrontLayout';
 import HomeView from '../features/home/components/HomeView';
+import CatalogView from '../features/catalog/components/CatalogView';
+import ProductDetailView from '../features/catalog/components/ProductDetailView';
+import CheckoutView from '../features/checkout/components/CheckoutView';
+import OrderSuccessView from '../features/checkout/components/OrderSuccessView';
+import AccountView from '../features/account/components/AccountView';
 
 /**
  * Storefront Browser Router Configuration
@@ -15,6 +20,34 @@ export const router = createBrowserRouter([
       {
         index: true,
         element: <HomeView />,
+      },
+      {
+        path: 'catalog',
+        element: <CatalogView />,
+      },
+      {
+        path: 'catalog/:categorySlug',
+        element: <CatalogView />,
+      },
+      {
+        path: 'c/:slug',
+        element: <CatalogView />,
+      },
+      {
+        path: 'product/:slug',
+        element: <ProductDetailView />,
+      },
+      {
+        path: 'checkout',
+        element: <CheckoutView />,
+      },
+      {
+        path: 'order-success',
+        element: <OrderSuccessView />,
+      },
+      {
+        path: 'account',
+        element: <AccountView />,
       },
       {
         path: '*',

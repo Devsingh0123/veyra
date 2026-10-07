@@ -4,6 +4,7 @@ import Header from './Header';
 import MegaMenu from './MegaMenu';
 import MobileNav from './MobileNav';
 import Footer from './Footer';
+import CartDrawer from '../../features/cart/components/CartDrawer';
 
 export default function StorefrontLayout() {
   return (
@@ -16,6 +17,9 @@ export default function StorefrontLayout() {
 
       {/* Mobile drawer */}
       <MobileNav />
+
+      {/* Slide-over Shopping Cart Drawer */}
+      <CartDrawer />
 
       {/* Main Page Canvas */}
       <main className="flex-1 flex flex-col">

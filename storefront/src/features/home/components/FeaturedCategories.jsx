@@ -1,6 +1,7 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
 import { ArrowUpRight } from 'lucide-react';
+import { Badge } from '@/components/ui/badge';
 
 const FEATURED_CATS = [
   {
@@ -77,9 +78,9 @@ export default function FeaturedCategories() {
 
               {/* Tag */}
               <div className="relative z-10 mb-auto">
-                <span className="inline-block rounded-md bg-indigo-600/90 backdrop-blur-sm px-2.5 py-0.5 text-[10px] font-bold text-white uppercase tracking-wider">
+                <Badge variant="default" className="bg-indigo-600/90 backdrop-blur-sm text-[10px] font-bold text-white uppercase tracking-wider">
                   {cat.tag}
-                </span>
+                </Badge>
               </div>
 
               {/* Title & Arrow */}

@@ -7,9 +7,11 @@ import {
   CreditCard,
   Mail,
   MapPin,
-  Heart,
   CheckCircle2,
+  Lock,
 } from 'lucide-react';
+import { Separator } from '@/components/ui/separator';
+import { Badge } from '@/components/ui/badge';
 
 export default function Footer() {
   return (
@@ -83,6 +85,9 @@ export default function Footer() {
                 V
               </div>
               <span className="text-xl font-black tracking-wider text-white">VEYRA</span>
+              <Badge variant="outline" className="border-indigo-500/40 text-indigo-400 text-[10px]">
+                Verified Store
+              </Badge>
             </div>
             <p className="text-xs leading-relaxed text-slate-400 max-w-sm">
               VEYRA is India&apos;s premier multi-category commerce storefront engineered for discerning customers. Providing uncompromised quality, transparent statutory tax invoicing, and seamless Razorpay checkouts.
@@ -168,22 +173,25 @@ export default function Footer() {
           </div>
         </div>
 
+        <Separator className="my-8 bg-slate-800" />
+
         {/* Bottom Bar */}
-        <div className="mt-12 flex flex-col items-center justify-between gap-4 border-t border-slate-800/80 pt-8 sm:flex-row text-xs text-slate-400">
+        <div className="flex flex-col items-center justify-between gap-4 sm:flex-row text-xs text-slate-400">
           <p>© 2026 VEYRA Retail Ltd. All rights reserved.</p>
           <div className="flex items-center gap-3 text-slate-400 text-xs">
-            <span className="flex items-center gap-1">
+            <span className="flex items-center gap-1.5">
+              <Lock className="h-3 w-3 text-emerald-400" />
               <span>Razorpay</span>
-              <span className="text-slate-400">•</span>
+              <span className="text-slate-500">•</span>
               <span>UPI</span>
-              <span className="text-slate-400">•</span>
+              <span className="text-slate-500">•</span>
               <span>RuPay</span>
-              <span className="text-slate-400">•</span>
+              <span className="text-slate-500">•</span>
               <span>Netbanking</span>
             </span>
-            <span className="rounded-md border border-slate-800 bg-slate-900 px-2 py-0.5 text-[11px] text-slate-400">
+            <Badge variant="secondary" className="bg-slate-900 border-slate-800 text-slate-400 text-[10px]">
               INR (₹) India
-            </span>
+            </Badge>
           </div>
         </div>
       </div>

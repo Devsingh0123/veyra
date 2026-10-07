@@ -12,8 +12,13 @@
 >   - [x] **Step 1:** State & API Gateway Integration (RTK Query, Axios with automated `x-session-id` guest engine, `cartSlice`, `authSlice`, `uiSlice`, Redux `<Provider>` wired).
 >   - [x] **Step 2:** Navigation Chrome & Layout Shell (`Header`, `MegaMenu`, `MobileNav`, `Footer`, `StorefrontLayout`).
 >   - [x] **Step 3:** Homepage Discovery & Featured Showcases (`HeroBanner`, `FeaturedCategories`, `ProductCard`, `HomeView` mounted at `/`).
+>   - [x] **Step 4:** Product Discovery & Catalog Listing (`CatalogView` / PLP, `FilterSidebar`, faceted search & price filters, mounted on `/catalog`, `/catalog/:categorySlug`, `/c/:slug`).
+>   - [x] **Step 5:** Rich Product Detail Page (`ProductDetailView` / PDP, `ProductGallery` with zoom modal, `VariantSelector`, `PinDeliveryChecker`, `ProductSpecsTabs`, mounted on `/product/:slug`).
+>   - [x] **Step 6:** Slide-Over Bag Drawer & Cart State (`CartDrawer` with shadcn `Sheet`, `ScrollArea`, live quantity adjustment, free delivery indicator, Section 46 GST summary).
+>   - [x] **Step 7:** 3-Step Checkout Accordion (`CheckoutView` with 6-digit PIN code auto-fill, Section 46 tax quote breakdown, Razorpay vs COD selector, mounted on `/checkout`).
+>   - [x] **Step 8:** Payment Gateway & Order Confirmation (`PaymentModal` with UPI/Card/NetBanking, `OrderSuccessView` with 4-stage delivery telemetry & Section 46 tax invoice, mounted on `/order-success`).
 > - **Rule:** Build strictly **one small atomic step at a time** — no extra code without user confirmation.
-> - **Immediate Next Step on Resume:** **Step 4: Product Discovery & Catalog Listing (`CatalogView` / PLP)** — Build faceted `FilterSidebar`, high-converting product grid, search & category filtering, and mount on `/catalog`.
+> - **Immediate Next Step on Resume:** **Step 9: Customer Account & Order Tracking Portal (`AccountView`)** — Build order history view with live checkpoint telemetry, printable Section 46 tax invoice viewer, customer profile, and mount on `/account`.
 
 ---
 
@@ -124,38 +129,38 @@ storefront/
   - Build trending products showcase with price tags and quick-add actions.
   - Mount on root `/` route.
 
-- [ ] **Step 4: Product Discovery & Catalog Listing (`CatalogView` / PLP)**
+- [x] **Step 4: Product Discovery & Catalog Listing (`CatalogView` / PLP)**
   - Create `catalogApi` with search and category filtering queries.
   - Build faceted `FilterSidebar` (price slider/brackets, in-stock toggle, category chips).
   - Build high-converting `ProductCard` with rating badges, MRP discount tags, and stock alert indicators.
   - Mount on `/catalog` and `/c/:slug` routes.
 
-- [ ] **Step 5: Rich Product Detail Page (`ProductDetailView` / PDP)**
+- [x] **Step 5: Rich Product Detail Page (`ProductDetailView` / PDP)**
   - Create `productApi` to fetch single product details by slug.
   - Build multi-image gallery with zoom/thumbnail carousel.
   - Build `VariantSelector` with live SKU switching and price recalculation.
   - Build 6-digit Indian PIN code delivery serviceability checker.
   - Mount on `/product/:slug` route.
 
-- [ ] **Step 6: Slide-Over Bag Drawer & Cart State (`CartDrawer`)**
+- [x] **Step 6: Slide-Over Bag Drawer & Cart State (`CartDrawer`)**
   - Create `cartApi` connecting to Cart Service (`:3003`) via API Gateway.
   - Build slide-over `CartDrawer` with quantity increment/decrement, line-item removal, and animated empty states.
   - Build free delivery threshold progress indicator (e.g., "Add ₹499 more for FREE delivery").
   - Connect cart drawer toggle to Redux `cartSlice`.
 
-- [ ] **Step 7: 3-Step Checkout Accordion (`CheckoutView`)**
+- [x] **Step 7: 3-Step Checkout Accordion (`CheckoutView`)**
   - Create `checkoutApi` with quote calculations and tax breakdown.
   - **Step 1:** Address selection with 6-digit PIN code auto-fill.
   - **Step 2:** Order Summary with transparent Section 46 CGST/SGST breakdown.
   - **Step 3:** Payment method selection (Razorpay Online vs COD with ₹49 handling fee).
   - Mount on `/checkout` route.
 
-- [ ] **Step 8: Payment Gateway & Order Confirmation (`PaymentModal` / `OrderSuccessView`)**
+- [x] **Step 8: Payment Gateway & Order Confirmation (`PaymentModal` / `OrderSuccessView`)**
   - Integrate dynamic Razorpay Checkout JS modal for UPI/Card/Netbanking payments.
   - Build `OrderSuccessView` displaying order reference (`VYR-2026-XXXX`), estimated delivery date, and order tracking link.
   - Mount on `/order-success` route.
 
-- [ ] **Step 9: Customer Account & Order Tracking Portal (`AccountView`)**
+- [x] **Step 9: Customer Account & Order Tracking Portal (`AccountView`)**
   - Build order history view with live checkpoint telemetry (Placed &rarr; Packed &rarr; Shipped &rarr; Delivered).
   - Build 1-click printable Section 46 Tax Invoice viewer.
   - Build 7-day return request filing modal with photo defect upload and reason dropdown.

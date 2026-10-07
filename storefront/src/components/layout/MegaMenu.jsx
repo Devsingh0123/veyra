@@ -1,6 +1,7 @@
 import React from 'react';
 import { NavLink } from 'react-router-dom';
 import { Sparkles, Compass, Flame } from 'lucide-react';
+import { Badge } from '@/components/ui/badge';
 import { useGetCategoriesQuery } from '../../features/catalog/api/catalogApi';
 
 // Fallback categories if catalog backend has empty or unseeded data
@@ -70,9 +71,9 @@ export default function MegaMenu() {
           >
             <Flame className="h-3.5 w-3.5 text-rose-400 animate-pulse" />
             <span>Flash Deals</span>
-            <span className="rounded bg-rose-500 px-1.5 py-0.2 text-[9px] font-bold text-white uppercase tracking-wider">
+            <Badge variant="destructive" className="h-4 px-1.5 py-0 text-[9px] font-bold uppercase tracking-wider">
               HOT
-            </span>
+            </Badge>
           </NavLink>
         </div>
       </div>
