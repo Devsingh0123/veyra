@@ -15,7 +15,9 @@
     "dev:payment": "npm --workspace=services/payment-service run dev",
     "dev:notification": "npm --workspace=services/notification-service run dev",
     "dev:storefront": "npm --prefix storefront run dev",
-    "dev:admin": "npm --prefix admin run dev"
+    "dev:admin": "npm --prefix admin run dev",
+    "seed:mongo": "node scripts/seed-mongodb.js",
+    "db:up": "docker compose -f docker-compose.dev.yml up -d"
   },
   "engines": {
     "node": ">=20.0.0",

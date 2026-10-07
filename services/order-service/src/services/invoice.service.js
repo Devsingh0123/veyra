@@ -1,4 +1,6 @@
-import prisma from '../prisma.js';
+import Order from '../models/Order.model.js';
+import TaxInvoice from '../models/TaxInvoice.model.js';
+import InvoiceSequence from '../models/InvoiceSequence.model.js';
 
 export const invoiceService = {
   /**
@@ -20,14 +22,14 @@ export const invoiceService = {
    * Generate next atomic consecutive invoice number per FY
    * Format: VEY/26-27/000001
    */
-  async getNextInvoiceNumber(tx = prisma) {
+  async getNextInvoiceNumber() {
     const fy = this.getFinancialYear();
 
-    const seq = await tx.invoiceSequence.upsert({
-      where: { financialYear: fy },
-      update: { currentNumber: { increment: 1 } },
-      create: { financialYear: fy, currentNumber: 1 }
-    });
+    const seq = await InvoiceSequence.findOneAndUpdate(
+      { financialYear: fy },
+      { $inc: { currentNumber: 1 } },
+      { new: true, upsert: true }
+    );
 
     const paddedNumber = String(seq.currentNumber).padStart(6, '0');
     return {
@@ -41,59 +43,43 @@ export const invoiceService = {
    */
   async generateInvoice(orderId) {
     // 1. Check existing
-    const existing = await prisma.taxInvoice.findUnique({
-      where: { orderId }
-    });
+    const existing = await TaxInvoice.findOne({ orderId });
     if (existing) return existing;
 
-    // 2. Fetch order with items
-    const order = await prisma.order.findUnique({
-      where: { id: orderId },
-      include: { items: true }
-    });
+    // 2. Fetch order
+    const order = await Order.findById(orderId);
     if (!order) throw new Error('Order not found');
 
     const sellerGstin = process.env.SELLER_GSTIN || '07AABCV1234F1Z5';
 
     // 3. Atomically create TaxInvoice
-    return await prisma.$transaction(async (tx) => {
-      const { invoiceNumber, financialYear } = await this.getNextInvoiceNumber(tx);
+    const { invoiceNumber, financialYear } = await this.getNextInvoiceNumber();
 
-      // Taxable amount is subtotal - taxAmount
-      const subtotal = parseFloat(order.subtotal.toString());
-      const totalTax = parseFloat(order.taxAmount.toString());
-      const taxableAmount = Math.max(0, subtotal - totalTax);
+    const subtotal = parseFloat(order.subtotal.toString());
+    const totalTax = parseFloat(order.taxAmount.toString());
+    const taxableAmount = Math.max(0, subtotal - totalTax);
 
-      const invoice = await tx.taxInvoice.create({
-        data: {
-          orderId,
-          invoiceNumber,
-          financialYear,
-          invoiceDate: new Date(),
-          taxableAmount,
-          cgstAmount: order.cgstAmount,
-          sgstAmount: order.sgstAmount,
-          igstAmount: order.igstAmount,
-          totalAmount: order.totalAmount,
-          sellerGstin
-        }
-      });
-
-      return invoice;
+    const invoice = await TaxInvoice.create({
+      orderId,
+      invoiceNumber,
+      financialYear,
+      invoiceDate: new Date(),
+      taxableAmount,
+      cgstAmount: order.cgstAmount,
+      sgstAmount: order.sgstAmount,
+      igstAmount: order.igstAmount,
+      totalAmount: order.totalAmount,
+      sellerGstin
     });
+
+    return invoice;
   },
 
   /**
    * Render Section 46 CGST Compliant HTML Tax Invoice
    */
   async renderInvoiceHtml(orderId) {
-    const order = await prisma.order.findUnique({
-      where: { id: orderId },
-      include: {
-        items: true,
-        invoice: true
-      }
-    });
+    const order = await Order.findById(orderId).populate('invoice');
 
     if (!order) throw new Error('Order not found');
 
@@ -107,7 +93,7 @@ export const invoiceService = {
     const destState = shipAddr.state || 'Delhi';
     const destStateCode = shipAddr.stateCode || '07';
 
-    const itemsRowsHtml = order.items
+    const itemsRowsHtml = (order.items || [])
       .map((item, idx) => {
         const taxable = (parseFloat(item.totalPrice.toString()) - parseFloat(item.taxAmount.toString())).toFixed(2);
         return `
@@ -246,3 +232,5 @@ export const invoiceService = {
     `;
   }
 };
+
+export default invoiceService;

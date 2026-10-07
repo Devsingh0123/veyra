@@ -2,7 +2,8 @@ import argon2 from 'argon2';
 import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
 import { OAuth2Client } from 'google-auth-library';
-import prisma from '../prisma.js';
+import User from '../models/User.model.js';
+import RefreshToken from '../models/RefreshToken.model.js';
 
 const JWT_ACCESS_SECRET = process.env.JWT_ACCESS_SECRET || 'dev_jwt_access_secret_min_32_characters_long_12345';
 const JWT_ACCESS_EXPIRES_IN = process.env.JWT_ACCESS_EXPIRES_IN || '15m';
@@ -12,7 +13,7 @@ const googleClient = new OAuth2Client(GOOGLE_CLIENT_ID);
 
 function generateAccessToken(user) {
   return jwt.sign(
-    { sub: user.id, email: user.email, role: user.role },
+    { sub: user.id || user._id, email: user.email, role: user.role },
     JWT_ACCESS_SECRET,
     { expiresIn: JWT_ACCESS_EXPIRES_IN }
   );
@@ -33,14 +34,14 @@ export const authService = {
   async register({ email, password, fullName, phone }) {
     const normalizedEmail = email.toLowerCase().trim();
 
-    const existingUser = await prisma.user.findFirst({
-      where: {
-        OR: [
-          { email: normalizedEmail },
-          ...(phone ? [{ phone }] : [])
-        ]
-      }
-    });
+    const query = {
+      $or: [
+        { email: normalizedEmail },
+        ...(phone ? [{ phone }] : [])
+      ]
+    };
+
+    const existingUser = await User.findOne(query);
 
     if (existingUser) {
       if (existingUser.email === normalizedEmail) {
@@ -51,34 +52,31 @@ export const authService = {
 
     const passwordHash = await argon2.hash(password);
 
-    const user = await prisma.user.create({
-      data: {
-        email: normalizedEmail,
-        fullName: fullName.trim(),
-        phone: phone || null,
-        passwordHash,
-        role: 'CUSTOMER'
-      },
-      select: {
-        id: true,
-        email: true,
-        fullName: true,
-        phone: true,
-        role: true,
-        createdAt: true
-      }
+    const userDoc = await User.create({
+      email: normalizedEmail,
+      fullName: fullName.trim(),
+      phone: phone || null,
+      passwordHash,
+      role: 'CUSTOMER'
     });
+
+    const user = {
+      id: userDoc.id,
+      email: userDoc.email,
+      fullName: userDoc.fullName,
+      phone: userDoc.phone,
+      role: userDoc.role,
+      createdAt: userDoc.createdAt
+    };
 
     const accessToken = generateAccessToken(user);
     const { rawToken, tokenHash, familyId } = generateRefreshTokenPair();
 
-    await prisma.refreshToken.create({
-      data: {
-        userId: user.id,
-        tokenHash,
-        familyId,
-        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) // 7 days
-      }
+    await RefreshToken.create({
+      userId: user.id,
+      tokenHash,
+      familyId,
+      expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) // 7 days
     });
 
     return { user, accessToken, refreshToken: rawToken };
@@ -87,9 +85,7 @@ export const authService = {
   async login({ email, password }) {
     const normalizedEmail = email.toLowerCase().trim();
 
-    const user = await prisma.user.findUnique({
-      where: { email: normalizedEmail }
-    });
+    const user = await User.findOne({ email: normalizedEmail });
 
     if (!user || !user.passwordHash) {
       throw new Error('Invalid email or password');
@@ -116,13 +112,11 @@ export const authService = {
     const accessToken = generateAccessToken(safeUser);
     const { rawToken, tokenHash, familyId } = generateRefreshTokenPair();
 
-    await prisma.refreshToken.create({
-      data: {
-        userId: user.id,
-        tokenHash,
-        familyId,
-        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
-      }
+    await RefreshToken.create({
+      userId: user.id,
+      tokenHash,
+      familyId,
+      expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
     });
 
     return { user: safeUser, accessToken, refreshToken: rawToken };
@@ -146,42 +140,41 @@ export const authService = {
 
     const email = payload.email.toLowerCase().trim();
 
-    const user = await prisma.user.upsert({
-      where: { email },
-      update: {
-        googleId: payload.sub,
-        isVerified: true
+    const user = await User.findOneAndUpdate(
+      { email },
+      {
+        $set: {
+          googleId: payload.sub,
+          isVerified: true
+        },
+        $setOnInsert: {
+          fullName: payload.name || 'Google User',
+          role: 'CUSTOMER'
+        }
       },
-      create: {
-        email,
-        fullName: payload.name || 'Google User',
-        googleId: payload.sub,
-        isVerified: true,
-        role: 'CUSTOMER'
-      },
-      select: {
-        id: true,
-        email: true,
-        fullName: true,
-        phone: true,
-        role: true,
-        createdAt: true
-      }
-    });
+      { new: true, upsert: true }
+    );
 
-    const accessToken = generateAccessToken(user);
+    const safeUser = {
+      id: user.id,
+      email: user.email,
+      fullName: user.fullName,
+      phone: user.phone,
+      role: user.role,
+      createdAt: user.createdAt
+    };
+
+    const accessToken = generateAccessToken(safeUser);
     const { rawToken, tokenHash, familyId } = generateRefreshTokenPair();
 
-    await prisma.refreshToken.create({
-      data: {
-        userId: user.id,
-        tokenHash,
-        familyId,
-        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
-      }
+    await RefreshToken.create({
+      userId: user.id,
+      tokenHash,
+      familyId,
+      expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
     });
 
-    return { user, accessToken, refreshToken: rawToken };
+    return { user: safeUser, accessToken, refreshToken: rawToken };
   },
 
   async refreshToken(rawToken) {
@@ -190,10 +183,7 @@ export const authService = {
     }
 
     const tokenHash = hashToken(rawToken);
-    const tokenRecord = await prisma.refreshToken.findUnique({
-      where: { tokenHash },
-      include: { user: true }
-    });
+    const tokenRecord = await RefreshToken.findOne({ tokenHash });
 
     if (!tokenRecord) {
       throw new Error('Invalid refresh token');
@@ -201,10 +191,10 @@ export const authService = {
 
     // Replay attack prevention: if token already revoked, revoke whole family
     if (tokenRecord.isRevoked) {
-      await prisma.refreshToken.updateMany({
-        where: { familyId: tokenRecord.familyId },
-        data: { isRevoked: true }
-      });
+      await RefreshToken.updateMany(
+        { familyId: tokenRecord.familyId },
+        { $set: { isRevoked: true } }
+      );
       throw new Error('Token reuse detected. Session invalidated.');
     }
 
@@ -213,23 +203,23 @@ export const authService = {
     }
 
     // Revoke old token
-    await prisma.refreshToken.update({
-      where: { id: tokenRecord.id },
-      data: { isRevoked: true }
-    });
+    await RefreshToken.findByIdAndUpdate(tokenRecord.id, { $set: { isRevoked: true } });
 
     // Generate new token in same family
     const next = generateRefreshTokenPair();
-    await prisma.refreshToken.create({
-      data: {
-        userId: tokenRecord.userId,
-        tokenHash: next.tokenHash,
-        familyId: tokenRecord.familyId,
-        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
-      }
+    await RefreshToken.create({
+      userId: tokenRecord.userId,
+      tokenHash: next.tokenHash,
+      familyId: tokenRecord.familyId,
+      expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
     });
 
-    const newAccessToken = generateAccessToken(tokenRecord.user);
+    const user = await User.findById(tokenRecord.userId);
+    if (!user) {
+      throw new Error('User not found');
+    }
+
+    const newAccessToken = generateAccessToken(user);
 
     return {
       accessToken: newAccessToken,
@@ -240,65 +230,67 @@ export const authService = {
   async logout(rawToken) {
     if (!rawToken) return;
     const tokenHash = hashToken(rawToken);
-    const tokenRecord = await prisma.refreshToken.findUnique({
-      where: { tokenHash }
-    });
+    const tokenRecord = await RefreshToken.findOne({ tokenHash });
     if (tokenRecord) {
-      await prisma.refreshToken.updateMany({
-        where: { familyId: tokenRecord.familyId },
-        data: { isRevoked: true }
-      });
+      await RefreshToken.updateMany(
+        { familyId: tokenRecord.familyId },
+        { $set: { isRevoked: true } }
+      );
     }
   },
 
   async getProfile(userId) {
-    const user = await prisma.user.findUnique({
-      where: { id: userId },
-      select: {
-        id: true,
-        email: true,
-        fullName: true,
-        phone: true,
-        role: true,
-        isActive: true,
-        createdAt: true
-      }
-    });
+    const user = await User.findById(userId);
 
     if (!user) {
       throw new Error('User not found');
     }
 
-    return user;
+    return {
+      id: user.id,
+      email: user.email,
+      fullName: user.fullName,
+      phone: user.phone,
+      role: user.role,
+      isActive: user.isActive,
+      createdAt: user.createdAt
+    };
   },
 
   async updateProfile(userId, { fullName, phone }) {
     if (phone) {
-      const existing = await prisma.user.findFirst({
-        where: {
-          phone,
-          NOT: { id: userId }
-        }
+      const existing = await User.findOne({
+        phone,
+        _id: { $ne: userId }
       });
       if (existing) {
         throw new Error('Phone number already in use by another account');
       }
     }
 
-    return await prisma.user.update({
-      where: { id: userId },
-      data: {
-        ...(fullName && { fullName: fullName.trim() }),
-        ...(phone !== undefined && { phone: phone || null })
-      },
-      select: {
-        id: true,
-        email: true,
-        fullName: true,
-        phone: true,
-        role: true,
-        createdAt: true
-      }
-    });
+    const updateFields = {};
+    if (fullName) updateFields.fullName = fullName.trim();
+    if (phone !== undefined) updateFields.phone = phone || null;
+
+    const updatedUser = await User.findByIdAndUpdate(
+      userId,
+      { $set: updateFields },
+      { new: true }
+    );
+
+    if (!updatedUser) {
+      throw new Error('User not found');
+    }
+
+    return {
+      id: updatedUser.id,
+      email: updatedUser.email,
+      fullName: updatedUser.fullName,
+      phone: updatedUser.phone,
+      role: updatedUser.role,
+      createdAt: updatedUser.createdAt
+    };
   }
 };
+
+export default authService;

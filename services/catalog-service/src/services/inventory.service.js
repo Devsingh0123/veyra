@@ -1,10 +1,9 @@
-import prisma from '../prisma.js';
+import Inventory from '../models/Inventory.model.js';
+import InventoryReservation from '../models/InventoryReservation.model.js';
 
 export const inventoryService = {
   async getStock(variantId) {
-    const inv = await prisma.inventory.findUnique({
-      where: { variantId }
-    });
+    const inv = await Inventory.findOne({ variantId });
     if (!inv) throw new Error('Inventory not found');
     return {
       variantId,
@@ -18,81 +17,70 @@ export const inventoryService = {
     const qty = parseInt(quantity, 10);
     if (!qty || qty <= 0) throw new Error('Invalid quantity');
 
-    return await prisma.$transaction(async (tx) => {
-      const inv = await tx.inventory.findUnique({ where: { variantId } });
-      if (!inv) throw new Error('Inventory not found');
+    const inv = await Inventory.findOne({ variantId });
+    if (!inv) throw new Error('Inventory not found');
 
-      const available = inv.stockQuantity - inv.reservedQuantity;
-      if (available < qty) throw new Error('Insufficient stock available');
+    const available = inv.stockQuantity - inv.reservedQuantity;
+    if (available < qty) throw new Error('Insufficient stock available');
 
-      // Atomic versioned update
-      const updated = await tx.inventory.updateMany({
-        where: {
-          variantId,
-          version: inv.version,
-          stockQuantity: { gte: inv.reservedQuantity + qty }
-        },
-        data: {
-          reservedQuantity: { increment: qty },
-          version: { increment: 1 }
-        }
-      });
+    // Atomic versioned conditional update
+    const updated = await Inventory.findOneAndUpdate(
+      {
+        variantId,
+        version: inv.version,
+        $expr: { $gte: [{ $subtract: ['$stockQuantity', '$reservedQuantity'] }, qty] }
+      },
+      {
+        $inc: { reservedQuantity: qty, version: 1 }
+      },
+      { new: true }
+    );
 
-      if (updated.count === 0) throw new Error('Stock update conflict, please retry');
+    if (!updated) throw new Error('Stock update conflict, please retry');
 
-      return await tx.inventoryReservation.create({
-        data: {
-          reservationToken,
-          variantId,
-          quantity: qty,
-          expiresAt: new Date(Date.now() + 15 * 60 * 1000) // 15 mins
-        }
-      });
+    return await InventoryReservation.create({
+      reservationToken,
+      variantId,
+      quantity: qty,
+      expiresAt: new Date(Date.now() + 15 * 60 * 1000) // 15 mins
     });
   },
 
   async releaseStock(reservationToken) {
-    return await prisma.$transaction(async (tx) => {
-      const reservation = await tx.inventoryReservation.findUnique({
-        where: { reservationToken }
-      });
-      if (!reservation || reservation.status !== 'ACTIVE') return null;
+    const reservation = await InventoryReservation.findOne({ reservationToken });
+    if (!reservation || reservation.status !== 'ACTIVE') return null;
 
-      await tx.inventory.update({
-        where: { variantId: reservation.variantId },
-        data: {
-          reservedQuantity: { decrement: reservation.quantity },
-          version: { increment: 1 }
-        }
-      });
+    await Inventory.findOneAndUpdate(
+      { variantId: reservation.variantId },
+      {
+        $inc: { reservedQuantity: -reservation.quantity, version: 1 }
+      }
+    );
 
-      return await tx.inventoryReservation.update({
-        where: { reservationToken },
-        data: { status: 'RELEASED' }
-      });
-    });
+    reservation.status = 'RELEASED';
+    await reservation.save();
+    return reservation;
   },
 
   async fulfillStock(reservationToken) {
-    return await prisma.$transaction(async (tx) => {
-      const reservation = await tx.inventoryReservation.findUnique({
-        where: { reservationToken }
-      });
-      if (!reservation || reservation.status !== 'ACTIVE') return null;
+    const reservation = await InventoryReservation.findOne({ reservationToken });
+    if (!reservation || reservation.status !== 'ACTIVE') return null;
 
-      await tx.inventory.update({
-        where: { variantId: reservation.variantId },
-        data: {
-          stockQuantity: { decrement: reservation.quantity },
-          reservedQuantity: { decrement: reservation.quantity },
-          version: { increment: 1 }
+    await Inventory.findOneAndUpdate(
+      { variantId: reservation.variantId },
+      {
+        $inc: {
+          stockQuantity: -reservation.quantity,
+          reservedQuantity: -reservation.quantity,
+          version: 1
         }
-      });
+      }
+    );
 
-      return await tx.inventoryReservation.update({
-        where: { reservationToken },
-        data: { status: 'FULFILLED' }
-      });
-    });
+    reservation.status = 'FULFILLED';
+    await reservation.save();
+    return reservation;
   }
 };
+
+export default inventoryService;

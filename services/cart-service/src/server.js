@@ -4,7 +4,7 @@ import cookieParser from 'cookie-parser';
 import { existsSync } from 'fs';
 import { resolve } from 'path';
 import cartRoutes from './routes/cart.routes.js';
-import prisma from './prisma.js';
+import { connectDB, disconnectDB } from './config/db.js';
 import redis from './redis.js';
 
 // Load .env natively
@@ -50,24 +50,35 @@ app.use((err, req, res, next) => {
   res.status(500).json({ success: false, error: err.message || 'Internal Server Error' });
 });
 
-const server = app.listen(PORT, () => {
-  console.log(`[Cart Service] Running on http://localhost:${PORT}`);
-});
+let server;
+try {
+  await connectDB();
+  server = app.listen(PORT, () => {
+    console.log(`[Cart Service] Running on http://localhost:${PORT}`);
+  });
+} catch (err) {
+  console.error('[Cart Service] Fatal error during startup:', err);
+  process.exit(1);
+}
 
 process.on('SIGTERM', async () => {
-  server.close(async () => {
-    await prisma.$disconnect();
-    await redis.quit();
-    process.exit(0);
-  });
+  if (server) {
+    server.close(async () => {
+      await disconnectDB();
+      await redis.quit();
+      process.exit(0);
+    });
+  }
 });
 
 process.on('SIGINT', async () => {
-  server.close(async () => {
-    await prisma.$disconnect();
-    await redis.quit();
-    process.exit(0);
-  });
+  if (server) {
+    server.close(async () => {
+      await disconnectDB();
+      await redis.quit();
+      process.exit(0);
+    });
+  }
 });
 
 export default app;

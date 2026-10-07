@@ -5,7 +5,7 @@ import { resolve } from 'path';
 import categoryRoutes from './routes/category.routes.js';
 import productRoutes from './routes/product.routes.js';
 import inventoryRoutes from './routes/inventory.routes.js';
-import prisma from './prisma.js';
+import { connectDB, disconnectDB } from './config/db.js';
 
 // Load .env natively
 const envPath = resolve(process.cwd(), '.env');
@@ -51,22 +51,33 @@ app.use((err, req, res, next) => {
   res.status(500).json({ success: false, error: err.message || 'Internal Server Error' });
 });
 
-const server = app.listen(PORT, () => {
-  console.log(`[Catalog Service] Running on http://localhost:${PORT}`);
-});
+let server;
+try {
+  await connectDB();
+  server = app.listen(PORT, () => {
+    console.log(`[Catalog Service] Running on http://localhost:${PORT}`);
+  });
+} catch (err) {
+  console.error('[Catalog Service] Fatal error during startup:', err);
+  process.exit(1);
+}
 
 process.on('SIGTERM', async () => {
-  server.close(async () => {
-    await prisma.$disconnect();
-    process.exit(0);
-  });
+  if (server) {
+    server.close(async () => {
+      await disconnectDB();
+      process.exit(0);
+    });
+  }
 });
 
 process.on('SIGINT', async () => {
-  server.close(async () => {
-    await prisma.$disconnect();
-    process.exit(0);
-  });
+  if (server) {
+    server.close(async () => {
+      await disconnectDB();
+      process.exit(0);
+    });
+  }
 });
 
 export default app;

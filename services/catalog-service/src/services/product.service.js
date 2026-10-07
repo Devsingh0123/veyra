@@ -1,4 +1,6 @@
-import prisma from '../prisma.js';
+import Product from '../models/Product.model.js';
+import ProductVariant from '../models/ProductVariant.model.js';
+import Inventory from '../models/Inventory.model.js';
 
 function toSlug(text) {
   return text.toLowerCase().trim().replace(/\s+/g, '-').replace(/[^\w\-]+/g, '');
@@ -10,29 +12,28 @@ export const productService = {
     const limitNum = Math.max(1, Math.min(100, parseInt(limit, 10)));
     const skip = (pageNum - 1) * limitNum;
 
-    const where = { isActive: true };
-    if (categoryId) where.categoryId = categoryId;
+    const query = { isActive: true };
+    if (categoryId) query.categoryId = categoryId;
     if (search) {
-      where.OR = [
-        { name: { contains: search, mode: 'insensitive' } },
-        { description: { contains: search, mode: 'insensitive' } }
+      query.$or = [
+        { name: { $regex: search, $options: 'i' } },
+        { description: { $regex: search, $options: 'i' } }
       ];
     }
 
-    const orderBy = sortBy === 'name' ? { name: 'asc' } : { createdAt: 'desc' };
+    const sortOrder = sortBy === 'name' ? { name: 1 } : { createdAt: -1 };
 
     const [total, items] = await Promise.all([
-      prisma.product.count({ where }),
-      prisma.product.findMany({
-        where,
-        skip,
-        take: limitNum,
-        orderBy,
-        include: {
-          category: { select: { id: true, name: true, slug: true } },
-          variants: { include: { inventory: true } }
-        }
-      })
+      Product.countDocuments(query),
+      Product.find(query)
+        .skip(skip)
+        .limit(limitNum)
+        .sort(sortOrder)
+        .populate('category', 'id name slug')
+        .populate({
+          path: 'variants',
+          populate: { path: 'inventory' }
+        })
     ]);
 
     return {
@@ -47,13 +48,12 @@ export const productService = {
   },
 
   async getProductBySlug(slug) {
-    const product = await prisma.product.findUnique({
-      where: { slug },
-      include: {
-        category: true,
-        variants: { include: { inventory: true } }
-      }
-    });
+    const product = await Product.findOne({ slug })
+      .populate('category')
+      .populate({
+        path: 'variants',
+        populate: { path: 'inventory' }
+      });
 
     if (!product) throw new Error('Product not found');
     return product;
@@ -61,53 +61,54 @@ export const productService = {
 
   async createProduct({ name, categoryId, brandId, description, hsnCode, gstRate, attributes = {}, variants = [] }) {
     let slug = toSlug(name);
-    const existing = await prisma.product.findUnique({ where: { slug } });
+    const existing = await Product.findOne({ slug });
     if (existing) {
       slug = `${slug}-${Date.now().toString().slice(-4)}`;
     }
 
-    return await prisma.$transaction(async (tx) => {
-      const product = await tx.product.create({
-        data: {
-          name: name.trim(),
-          slug,
-          categoryId,
-          brandId: brandId || null,
-          description: description || null,
-          hsnCode: hsnCode.toString(),
-          gstRate: parseFloat(gstRate) || 18,
-          attributes
-        }
+    const product = await Product.create({
+      name: name.trim(),
+      slug,
+      categoryId,
+      brandId: brandId || null,
+      description: description || null,
+      hsnCode: hsnCode.toString(),
+      gstRate: parseFloat(gstRate) || 18,
+      attributes
+    });
+
+    const createdVariants = [];
+    for (const v of variants) {
+      const variant = await ProductVariant.create({
+        productId: product.id,
+        sku: v.sku.trim(),
+        title: v.title.trim(),
+        mrp: parseFloat(v.mrp),
+        sellingPrice: parseFloat(v.sellingPrice),
+        weightGrams: parseInt(v.weightGrams, 10) || 100,
+        lengthCm: v.lengthCm ? parseFloat(v.lengthCm) : null,
+        widthCm: v.widthCm ? parseFloat(v.widthCm) : null,
+        heightCm: v.heightCm ? parseFloat(v.heightCm) : null,
+        variantOptions: v.variantOptions || {},
+        images: v.images || []
       });
 
-      const createdVariants = [];
-      for (const v of variants) {
-        const variant = await tx.productVariant.create({
-          data: {
-            productId: product.id,
-            sku: v.sku.trim(),
-            title: v.title.trim(),
-            mrp: parseFloat(v.mrp),
-            sellingPrice: parseFloat(v.sellingPrice),
-            weightGrams: parseInt(v.weightGrams, 10) || 100,
-            lengthCm: v.lengthCm ? parseFloat(v.lengthCm) : null,
-            widthCm: v.widthCm ? parseFloat(v.widthCm) : null,
-            heightCm: v.heightCm ? parseFloat(v.heightCm) : null,
-            variantOptions: v.variantOptions || {},
-            images: v.images || [],
-            inventory: {
-              create: {
-                stockQuantity: parseInt(v.initialStock, 10) || 0,
-                reservedQuantity: 0
-              }
-            }
-          },
-          include: { inventory: true }
-        });
-        createdVariants.push(variant);
-      }
+      const inv = await Inventory.create({
+        variantId: variant.id,
+        stockQuantity: parseInt(v.initialStock, 10) || 0,
+        reservedQuantity: 0,
+        version: 1
+      });
 
-      return { ...product, variants: createdVariants };
-    });
+      const variantJson = variant.toJSON();
+      variantJson.inventory = inv.toJSON();
+      createdVariants.push(variantJson);
+    }
+
+    const productJson = product.toJSON();
+    productJson.variants = createdVariants;
+    return productJson;
   }
 };
+
+export default productService;

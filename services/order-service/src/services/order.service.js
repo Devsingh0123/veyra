@@ -1,4 +1,5 @@
-import prisma from '../prisma.js';
+import Order from '../models/Order.model.js';
+import Coupon from '../models/Coupon.model.js';
 import { gstService } from './gst.service.js';
 import { fsmService } from './fsm.service.js';
 
@@ -20,8 +21,8 @@ export const orderService = {
     let appliedCoupon = null;
 
     if (couponCode) {
-      const coupon = await prisma.coupon.findUnique({
-        where: { code: couponCode.trim().toUpperCase() }
+      const coupon = await Coupon.findOne({
+        code: couponCode.trim().toUpperCase()
       });
 
       if (!coupon || !coupon.isActive) {
@@ -138,93 +139,74 @@ export const orderService = {
     });
 
     const orderNumber = `VYR-${Date.now().toString().slice(-8)}-${Math.floor(1000 + Math.random() * 9000)}`;
-
     const initialStatus = paymentMethod === 'COD' ? 'CONFIRMED' : 'PAYMENT_PENDING';
     const initialPaymentStatus = 'PENDING';
 
-    const order = await prisma.$transaction(async (tx) => {
-      // 1. Create Order master record
-      const createdOrder = await tx.order.create({
-        data: {
-          orderNumber,
-          userId,
-          status: initialStatus,
-          paymentMethod,
-          paymentStatus: initialPaymentStatus,
-          subtotal: quote.subtotal,
-          discountAmount: quote.discountAmount,
-          shippingFee: quote.shippingFee,
-          codFee: quote.codFee,
-          taxAmount: quote.taxBreakdown.totalTax,
-          cgstAmount: quote.taxBreakdown.cgst,
-          sgstAmount: quote.taxBreakdown.sgst,
-          igstAmount: quote.taxBreakdown.igst,
-          totalAmount: quote.totalAmount,
-          couponCode: quote.appliedCoupon?.code || null,
-          shippingAddress,
-          billingAddress: billingAddress || shippingAddress
-        }
-      });
+    const orderItemsData = quote.lineItems.map((item) => ({
+      productId: item.productId || null,
+      variantId: item.variantId,
+      productTitle: item.productTitle || item.name || 'Product',
+      variantTitle: item.variantTitle || item.title || 'Standard',
+      sku: item.sku || `SKU-${item.variantId.slice(0, 8)}`,
+      hsnCode: item.hsnCode || '00000000',
+      unitPrice: item.unitPrice,
+      quantity: item.quantity,
+      taxRate: item.taxRate,
+      taxAmount: item.taxAmount,
+      totalPrice: item.totalPrice,
+      itemAttributes: item.itemAttributes || item.variantOptions || {}
+    }));
 
-      // 2. Create immutable Order Items
-      const orderItemsData = quote.lineItems.map((item) => ({
-        orderId: createdOrder.id,
-        productId: item.productId || null,
-        variantId: item.variantId,
-        productTitle: item.productTitle || item.name || 'Product',
-        variantTitle: item.variantTitle || item.title || 'Standard',
-        sku: item.sku || `SKU-${item.variantId.slice(0, 8)}`,
-        hsnCode: item.hsnCode || '00000000',
-        unitPrice: item.unitPrice,
-        quantity: item.quantity,
-        taxRate: item.taxRate,
-        taxAmount: item.taxAmount,
-        totalPrice: item.totalPrice,
-        itemAttributes: item.itemAttributes || item.variantOptions || {}
-      }));
-
-      await tx.orderItem.createMany({
-        data: orderItemsData
-      });
-
-      // 3. Create initial FSM audit log entry
-      await tx.orderHistory.create({
-        data: {
-          orderId: createdOrder.id,
-          fromState: 'PENDING',
-          toState: initialStatus,
-          actorRole: 'CUSTOMER',
-          note: paymentMethod === 'COD' ? 'COD order placed and confirmed' : 'Order created, awaiting payment'
-        }
-      });
-
-      // 4. Update coupon usage if applicable
-      if (quote.appliedCoupon?.code) {
-        await tx.coupon.update({
-          where: { code: quote.appliedCoupon.code },
-          data: { usedCount: { increment: 1 } }
-        });
+    const initialHistory = [
+      {
+        fromState: 'PENDING',
+        toState: initialStatus,
+        actorRole: 'CUSTOMER',
+        note: paymentMethod === 'COD' ? 'COD order placed and confirmed' : 'Order created, awaiting payment'
       }
+    ];
 
-      return createdOrder;
+    const createdOrder = await Order.create({
+      orderNumber,
+      userId,
+      status: initialStatus,
+      paymentMethod,
+      paymentStatus: initialPaymentStatus,
+      subtotal: quote.subtotal,
+      discountAmount: quote.discountAmount,
+      shippingFee: quote.shippingFee,
+      codFee: quote.codFee,
+      taxAmount: quote.taxBreakdown.totalTax,
+      cgstAmount: quote.taxBreakdown.cgst,
+      sgstAmount: quote.taxBreakdown.sgst,
+      igstAmount: quote.taxBreakdown.igst,
+      totalAmount: quote.totalAmount,
+      couponCode: quote.appliedCoupon?.code || null,
+      shippingAddress,
+      billingAddress: billingAddress || shippingAddress,
+      items: orderItemsData,
+      history: initialHistory
     });
 
-    return this.getOrderById(order.id);
+    // Update coupon usage if applicable
+    if (quote.appliedCoupon?.code) {
+      await Coupon.findOneAndUpdate(
+        { code: quote.appliedCoupon.code },
+        { $inc: { usedCount: 1 } }
+      );
+    }
+
+    return await this.getOrderById(createdOrder.id);
   },
 
   /**
    * Fetch single order with items and history
    */
   async getOrderById(orderId, userId = null) {
-    const order = await prisma.order.findUnique({
-      where: { id: orderId },
-      include: {
-        items: true,
-        history: {
-          orderBy: { createdAt: 'asc' }
-        }
-      }
-    });
+    const order = await Order.findById(orderId)
+      .populate('invoice')
+      .populate('shipment')
+      .populate('returns');
 
     if (!order) {
       throw new Error('Order not found');
@@ -245,22 +227,18 @@ export const orderService = {
     const limitNum = Math.max(1, Math.min(50, parseInt(limit, 10) || 10));
     const skip = (pageNum - 1) * limitNum;
 
-    const where = { userId };
+    const query = { userId };
     if (status) {
-      where.status = status;
+      query.status = status;
     }
 
     const [total, orders] = await Promise.all([
-      prisma.order.count({ where }),
-      prisma.order.findMany({
-        where,
-        skip,
-        take: limitNum,
-        orderBy: { createdAt: 'desc' },
-        include: {
-          items: true
-        }
-      })
+      Order.countDocuments(query),
+      Order.find(query)
+        .skip(skip)
+        .limit(limitNum)
+        .sort({ createdAt: -1 })
+        .populate('shipment')
     ]);
 
     return {
@@ -278,7 +256,7 @@ export const orderService = {
    * Cancel order (customer or admin initiated)
    */
   async cancelOrder(orderId, userId = null, reason = 'Cancelled by user') {
-    const order = await prisma.order.findUnique({ where: { id: orderId } });
+    const order = await Order.findById(orderId);
     if (!order) throw new Error('Order not found');
 
     if (userId && order.userId !== userId) {
@@ -291,72 +269,51 @@ export const orderService = {
 
     fsmService.validateTransition(order.status, 'CANCELLED');
 
-    const updated = await prisma.$transaction(async (tx) => {
-      const cancelled = await tx.order.update({
-        where: { id: orderId },
-        data: {
-          status: 'CANCELLED',
-          cancellationReason: reason,
-          cancelledAt: new Date()
-        }
-      });
-
-      await tx.orderHistory.create({
-        data: {
-          orderId,
-          fromState: order.status,
-          toState: 'CANCELLED',
-          actorRole: userId ? 'CUSTOMER' : 'ADMIN',
-          note: reason
-        }
-      });
-
-      return cancelled;
+    const oldStatus = order.status;
+    order.status = 'CANCELLED';
+    order.cancellationReason = reason;
+    order.cancelledAt = new Date();
+    order.history.push({
+      fromState: oldStatus,
+      toState: 'CANCELLED',
+      actorRole: userId ? 'CUSTOMER' : 'ADMIN',
+      note: reason
     });
 
-    return updated;
+    await order.save();
+    return order;
   },
 
   /**
    * Update order status with FSM check (Admin / Worker)
    */
   async updateOrderStatus(orderId, nextState, { actorRole = 'ADMIN', note = '' } = {}) {
-    const order = await prisma.order.findUnique({ where: { id: orderId } });
+    const order = await Order.findById(orderId);
     if (!order) throw new Error('Order not found');
 
     fsmService.validateTransition(order.status, nextState);
 
-    const updateData = { status: nextState };
+    const oldStatus = order.status;
+    order.status = nextState;
 
     // Automatic payment status sync
     if (nextState === 'DELIVERED' && order.paymentMethod === 'COD') {
-      updateData.paymentStatus = 'PAID';
+      order.paymentStatus = 'PAID';
     } else if (nextState === 'CONFIRMED' && order.paymentMethod === 'PREPAID') {
-      updateData.paymentStatus = 'PAID';
+      order.paymentStatus = 'PAID';
     } else if (nextState === 'REFUNDED') {
-      updateData.paymentStatus = 'REFUNDED';
+      order.paymentStatus = 'REFUNDED';
     }
 
-    const updated = await prisma.$transaction(async (tx) => {
-      const res = await tx.order.update({
-        where: { id: orderId },
-        data: updateData
-      });
-
-      await tx.orderHistory.create({
-        data: {
-          orderId,
-          fromState: order.status,
-          toState: nextState,
-          actorRole,
-          note: note || `State transitioned to ${nextState}`
-        }
-      });
-
-      return res;
+    order.history.push({
+      fromState: oldStatus,
+      toState: nextState,
+      actorRole,
+      note: note || `State transitioned to ${nextState}`
     });
 
-    return updated;
+    await order.save();
+    return order;
   },
 
   /**
@@ -367,25 +324,19 @@ export const orderService = {
     const limitNum = Math.max(1, Math.min(100, parseInt(limit, 10) || 20));
     const skip = (pageNum - 1) * limitNum;
 
-    const where = {};
-    if (status) where.status = status;
+    const query = {};
+    if (status) query.status = status;
     if (search) {
-      where.OR = [
-        { orderNumber: { contains: search, mode: 'insensitive' } }
-      ];
+      query.orderNumber = { $regex: search, $options: 'i' };
     }
 
     const [total, orders] = await Promise.all([
-      prisma.order.count({ where }),
-      prisma.order.findMany({
-        where,
-        skip,
-        take: limitNum,
-        orderBy: { createdAt: 'desc' },
-        include: {
-          items: true
-        }
-      })
+      Order.countDocuments(query),
+      Order.find(query)
+        .skip(skip)
+        .limit(limitNum)
+        .sort({ createdAt: -1 })
+        .populate('shipment')
     ]);
 
     return {
@@ -399,3 +350,5 @@ export const orderService = {
     };
   }
 };
+
+export default orderService;

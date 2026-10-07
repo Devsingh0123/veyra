@@ -1,20 +1,15 @@
 version: '3.8'
 
 services:
-  postgres:
-    image: postgres:16-alpine
-    container_name: veyra-postgres-dev
-    environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgrespassword
-      POSTGRES_DB: veyra_dev
+  mongodb:
+    image: mongo:7.0
+    container_name: veyra-mongodb-dev
     ports:
-      - "5432:5432"
+      - "27017:27017"
     volumes:
-      - postgres_dev_data:/var/lib/postgresql/data
-      - ./init-schemas.sql:/docker-entrypoint-initdb.d/init-schemas.sql:ro
+      - mongodb_dev_data:/data/db
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d veyra_dev"]
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -38,7 +33,7 @@ services:
       - veyra-network
 
 volumes:
-  postgres_dev_data:
+  mongodb_dev_data:
   redis_dev_data:
 
 networks:

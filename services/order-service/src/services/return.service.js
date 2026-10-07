@@ -1,4 +1,7 @@
-import prisma from '../prisma.js';
+import Order from '../models/Order.model.js';
+import ReturnRequest from '../models/ReturnRequest.model.js';
+import CreditNote from '../models/CreditNote.model.js';
+import CreditNoteSequence from '../models/CreditNoteSequence.model.js';
 import { fsmService } from './fsm.service.js';
 import { invoiceService } from './invoice.service.js';
 
@@ -24,13 +27,7 @@ export const returnService = {
     if (!userId) throw new Error('userId is required');
     if (!reason) throw new Error('Return reason is required');
 
-    const order = await prisma.order.findUnique({
-      where: { id: orderId },
-      include: {
-        shipment: true,
-        returns: true
-      }
-    });
+    const order = await Order.findById(orderId).populate('shipment').populate('returns');
 
     if (!order) throw new Error('Order not found');
 
@@ -53,53 +50,44 @@ export const returnService = {
       throw new Error(`A return request is already active for this order (Status: ${activeReturn.status}).`);
     }
 
-    return await prisma.$transaction(async (tx) => {
-      // 1. Create Return Request
-      const returnReq = await tx.returnRequest.create({
-        data: {
-          orderId,
-          userId,
-          reason,
-          comments,
-          images,
-          status: 'REQUESTED',
-          refundAmount: order.totalAmount
-        }
-      });
-
-      // 2. Advance Order status to RETURN_REQUESTED
-      fsmService.validateTransition(order.status, 'RETURN_REQUESTED');
-
-      await tx.order.update({
-        where: { id: orderId },
-        data: { status: 'RETURN_REQUESTED' }
-      });
-
-      await tx.orderHistory.create({
-        data: {
-          orderId,
-          fromState: order.status,
-          toState: 'RETURN_REQUESTED',
-          actorRole: 'CUSTOMER',
-          note: `Return filed by customer: ${reason}`
-        }
-      });
-
-      return returnReq;
+    // 1. Create Return Request
+    const returnReq = await ReturnRequest.create({
+      orderId,
+      userId,
+      reason,
+      comments,
+      images,
+      status: 'REQUESTED',
+      refundAmount: order.totalAmount
     });
+
+    // 2. Advance Order status to RETURN_REQUESTED
+    fsmService.validateTransition(order.status, 'RETURN_REQUESTED');
+
+    const oldStatus = order.status;
+    order.status = 'RETURN_REQUESTED';
+    order.history.push({
+      fromState: oldStatus,
+      toState: 'RETURN_REQUESTED',
+      actorRole: 'CUSTOMER',
+      note: `Return filed by customer: ${reason}`
+    });
+
+    await order.save();
+    return returnReq;
   },
 
   /**
    * Generate next consecutive Credit Note number (CN/26-27/000001)
    */
-  async getNextCreditNoteNumber(tx = prisma) {
+  async getNextCreditNoteNumber() {
     const fy = invoiceService.getFinancialYear();
 
-    const seq = await tx.creditNoteSequence.upsert({
-      where: { financialYear: fy },
-      update: { currentNumber: { increment: 1 } },
-      create: { financialYear: fy, currentNumber: 1 }
-    });
+    const seq = await CreditNoteSequence.findOneAndUpdate(
+      { financialYear: fy },
+      { $inc: { currentNumber: 1 } },
+      { new: true, upsert: true }
+    );
 
     const paddedNumber = String(seq.currentNumber).padStart(6, '0');
     return {
@@ -112,120 +100,83 @@ export const returnService = {
    * Advance return request through warehouse QC inspection & trigger refund
    */
   async updateReturnStatus(returnId, nextStatus, { adminNote = '', actorRole = 'ADMIN' } = {}) {
-    const returnReq = await prisma.returnRequest.findUnique({
-      where: { id: returnId },
-      include: {
-        order: {
-          include: { invoice: true }
-        },
-        creditNote: true
-      }
-    });
+    const returnReq = await ReturnRequest.findById(returnId).populate('creditNote');
 
     if (!returnReq) throw new Error('Return request not found');
 
-    const order = returnReq.order;
+    const order = await Order.findById(returnReq.orderId).populate('invoice');
+    if (!order) throw new Error('Order not found');
 
-    return await prisma.$transaction(async (tx) => {
-      let creditNote = returnReq.creditNote;
+    let creditNote = returnReq.creditNote;
 
-      // 1. If inspection passed or refunded, generate Statutory GST Credit Note
-      if ((nextStatus === 'INSPECTED_PASSED' || nextStatus === 'REFUNDED') && !creditNote) {
-        const { creditNoteNumber } = await this.getNextCreditNoteNumber(tx);
-        const originalInvoiceNo = order.invoice?.invoiceNumber || `INV-REF-${order.orderNumber}`;
+    // 1. If inspection passed or refunded, generate Statutory GST Credit Note
+    if ((nextStatus === 'INSPECTED_PASSED' || nextStatus === 'REFUNDED') && !creditNote) {
+      const { creditNoteNumber } = await this.getNextCreditNoteNumber();
+      const originalInvoiceNo = order.invoice?.invoiceNumber || `INV-REF-${order.orderNumber}`;
 
-        creditNote = await tx.creditNote.create({
-          data: {
-            returnRequestId: returnId,
-            creditNoteNumber,
-            originalInvoiceNo,
-            totalRefundGst: order.taxAmount,
-            totalRefundValue: order.totalAmount
-          }
-        });
-      }
-
-      // 2. Update Return Request record
-      const updatedReturn = await tx.returnRequest.update({
-        where: { id: returnId },
-        data: {
-          status: nextStatus,
-          adminNote: adminNote || returnReq.adminNote
-        },
-        include: { creditNote: true }
+      creditNote = await CreditNote.create({
+        returnRequestId: returnId,
+        creditNoteNumber,
+        originalInvoiceNo,
+        totalRefundGst: order.taxAmount,
+        totalRefundValue: order.totalAmount
       });
+    }
 
-      // 3. Sync Order FSM state
-      if (nextStatus === 'RECEIVED_AT_WAREHOUSE') {
-        if (fsmService.canTransition(order.status, 'RETURN_RECEIVED')) {
-          await tx.order.update({
-            where: { id: order.id },
-            data: { status: 'RETURN_RECEIVED' }
-          });
-          await tx.orderHistory.create({
-            data: {
-              orderId: order.id,
-              fromState: order.status,
-              toState: 'RETURN_RECEIVED',
-              actorRole,
-              note: adminNote || 'Package received at warehouse inspection hub'
-            }
-          });
-        }
-      } else if (nextStatus === 'INSPECTED_REJECTED') {
-        // Return item rejected, revert order to DELIVERED
-        await tx.order.update({
-          where: { id: order.id },
-          data: { status: 'DELIVERED' }
+    // 2. Update Return Request record
+    returnReq.status = nextStatus;
+    if (adminNote) returnReq.adminNote = adminNote;
+    await returnReq.save();
+
+    // 3. Sync Order FSM state
+    if (nextStatus === 'RECEIVED_AT_WAREHOUSE') {
+      if (fsmService.canTransition(order.status, 'RETURN_RECEIVED')) {
+        const oldState = order.status;
+        order.status = 'RETURN_RECEIVED';
+        order.history.push({
+          fromState: oldState,
+          toState: 'RETURN_RECEIVED',
+          actorRole,
+          note: adminNote || 'Package received at warehouse inspection hub'
         });
-        await tx.orderHistory.create({
-          data: {
-            orderId: order.id,
-            fromState: order.status,
-            toState: 'DELIVERED',
-            actorRole,
-            note: `Return rejected during QC inspection: ${adminNote}`
-          }
-        });
-      } else if (nextStatus === 'REFUNDED') {
-        // Full refund issued
-        if (fsmService.canTransition(order.status, 'REFUNDED')) {
-          await tx.order.update({
-            where: { id: order.id },
-            data: {
-              status: 'REFUNDED',
-              paymentStatus: 'REFUNDED'
-            }
-          });
-          await tx.orderHistory.create({
-            data: {
-              orderId: order.id,
-              fromState: order.status,
-              toState: 'REFUNDED',
-              actorRole,
-              note: `Full refund approved. GST Credit Note issued: ${creditNote?.creditNoteNumber || 'N/A'}`
-            }
-          });
-        }
+        await order.save();
       }
+    } else if (nextStatus === 'INSPECTED_REJECTED') {
+      // Return item rejected, revert order to DELIVERED
+      const oldState = order.status;
+      order.status = 'DELIVERED';
+      order.history.push({
+        fromState: oldState,
+        toState: 'DELIVERED',
+        actorRole,
+        note: `Return rejected during QC inspection: ${adminNote}`
+      });
+      await order.save();
+    } else if (nextStatus === 'REFUNDED') {
+      // Full refund issued
+      if (fsmService.canTransition(order.status, 'REFUNDED')) {
+        const oldState = order.status;
+        order.status = 'REFUNDED';
+        order.paymentStatus = 'REFUNDED';
+        order.history.push({
+          fromState: oldState,
+          toState: 'REFUNDED',
+          actorRole,
+          note: `Full refund approved. GST Credit Note issued: ${creditNote?.creditNoteNumber || 'N/A'}`
+        });
+        await order.save();
+      }
+    }
 
-      return updatedReturn;
-    });
+    const updated = await ReturnRequest.findById(returnId).populate('creditNote');
+    return updated;
   },
 
   /**
    * Render Section 34 CGST Compliant HTML Credit Note
    */
   async renderCreditNoteHtml(returnId) {
-    const returnReq = await prisma.returnRequest.findUnique({
-      where: { id: returnId },
-      include: {
-        creditNote: true,
-        order: {
-          include: { items: true, invoice: true }
-        }
-      }
-    });
+    const returnReq = await ReturnRequest.findById(returnId).populate('creditNote');
 
     if (!returnReq) throw new Error('Return request not found');
 
@@ -234,7 +185,9 @@ export const returnService = {
       creditNote = await this.getNextCreditNoteNumber();
     }
 
-    const order = returnReq.order;
+    const order = await Order.findById(returnReq.orderId).populate('invoice');
+    if (!order) throw new Error('Order not found');
+
     const invoiceNo = order.invoice?.invoiceNumber || 'INV-ORIGINAL';
     const shipAddr = order.shippingAddress || {};
 
@@ -308,18 +261,14 @@ export const returnService = {
    * Get single return request
    */
   async getReturnById(returnId) {
-    const returnReq = await prisma.returnRequest.findUnique({
-      where: { id: returnId },
-      include: {
-        order: {
-          include: { items: true, invoice: true }
-        },
-        creditNote: true
-      }
-    });
+    const returnReq = await ReturnRequest.findById(returnId).populate('creditNote');
 
     if (!returnReq) throw new Error('Return request not found');
-    return returnReq;
+
+    const order = await Order.findById(returnReq.orderId).populate('invoice');
+    const result = returnReq.toJSON();
+    result.order = order;
+    return result;
   },
 
   /**
@@ -330,29 +279,26 @@ export const returnService = {
     const limitNum = Math.max(1, Math.min(50, parseInt(limit, 10) || 10));
     const skip = (pageNum - 1) * limitNum;
 
-    const where = {};
-    if (userId) where.userId = userId;
-    if (status) where.status = status;
+    const query = {};
+    if (userId) query.userId = userId;
+    if (status) query.status = status;
 
-    const [total, returns] = await Promise.all([
-      prisma.returnRequest.count({ where }),
-      prisma.returnRequest.findMany({
-        where,
-        skip,
-        take: limitNum,
-        orderBy: { createdAt: 'desc' },
-        include: {
-          creditNote: true,
-          order: {
-            select: {
-              orderNumber: true,
-              totalAmount: true,
-              status: true
-            }
-          }
-        }
-      })
+    const [total, returnsDocs] = await Promise.all([
+      ReturnRequest.countDocuments(query),
+      ReturnRequest.find(query)
+        .skip(skip)
+        .limit(limitNum)
+        .sort({ createdAt: -1 })
+        .populate('creditNote')
     ]);
+
+    const returns = [];
+    for (const r of returnsDocs) {
+      const order = await Order.findById(r.orderId).select('orderNumber totalAmount status');
+      const rObj = r.toJSON();
+      rObj.order = order ? { orderNumber: order.orderNumber, totalAmount: order.totalAmount, status: order.status } : null;
+      returns.push(rObj);
+    }
 
     return {
       returns,
@@ -365,3 +311,5 @@ export const returnService = {
     };
   }
 };
+
+export default returnService;

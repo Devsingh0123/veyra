@@ -1,4 +1,5 @@
-import prisma from '../prisma.js';
+import Order from '../models/Order.model.js';
+import Shipment from '../models/Shipment.model.js';
 import { fsmService } from './fsm.service.js';
 
 /**
@@ -22,7 +23,6 @@ class MockLogisticsAdapter {
 
 export const logisticsService = {
   getAdapter(carrierName = 'MOCK') {
-    // In future, dynamically return new DelhiveryAdapter() or ShiprocketAdapter()
     return new MockLogisticsAdapter(carrierName.toUpperCase());
   },
 
@@ -58,10 +58,7 @@ export const logisticsService = {
     widthCm = 15,
     heightCm = 10
   }) {
-    const order = await prisma.order.findUnique({
-      where: { id: orderId },
-      include: { shipment: true }
-    });
+    const order = await Order.findById(orderId).populate('shipment');
 
     if (!order) throw new Error('Order not found');
     if (order.shipment) return order.shipment;
@@ -90,57 +87,50 @@ export const logisticsService = {
       notes: 'Shipment label created and manifested'
     };
 
-    return await prisma.$transaction(async (tx) => {
-      // 1. Create Shipment record
-      const shipment = await tx.shipment.create({
-        data: {
-          orderId,
-          carrier: carrierResult.carrier,
-          awbNumber: carrierResult.awbNumber,
-          labelUrl: carrierResult.labelUrl,
-          manifestUrl: carrierResult.manifestUrl,
-          billableWeightG,
-          ewayBillNumber,
-          currentStatus: 'MANIFESTED',
-          trackingHistory: [initialCheckpoint],
-          dispatchedAt: new Date()
-        }
-      });
-
-      // 2. Advance Order status to PACKED then SHIPPED
-      fsmService.validateTransition(order.status, 'PACKED');
-      fsmService.validateTransition('PACKED', 'SHIPPED');
-
-      await tx.order.update({
-        where: { id: orderId },
-        data: { status: 'SHIPPED' }
-      });
-
-      await tx.orderHistory.create({
-        data: {
-          orderId,
-          fromState: order.status,
-          toState: 'SHIPPED',
-          actorRole: 'LOGISTICS',
-          note: `Dispatched via ${carrierResult.carrier} (AWB: ${carrierResult.awbNumber})`
-        }
-      });
-
-      return shipment;
+    // 1. Create Shipment record
+    const shipment = await Shipment.create({
+      orderId,
+      carrier: carrierResult.carrier,
+      awbNumber: carrierResult.awbNumber,
+      labelUrl: carrierResult.labelUrl,
+      manifestUrl: carrierResult.manifestUrl,
+      billableWeightG,
+      ewayBillNumber,
+      currentStatus: 'MANIFESTED',
+      trackingHistory: [initialCheckpoint],
+      dispatchedAt: new Date()
     });
+
+    // 2. Advance Order status to PACKED then SHIPPED
+    fsmService.validateTransition(order.status, 'PACKED');
+    fsmService.validateTransition('PACKED', 'SHIPPED');
+
+    const oldStatus = order.status;
+    order.status = 'SHIPPED';
+    order.history.push({
+      fromState: oldStatus,
+      toState: 'SHIPPED',
+      actorRole: 'LOGISTICS',
+      note: `Dispatched via ${carrierResult.carrier} (AWB: ${carrierResult.awbNumber})`
+    });
+
+    await order.save();
+    return shipment;
   },
 
   /**
    * Real-time tracking webhook ingestion
    */
   async handleTrackingWebhook({ awbNumber, status, location = '', notes = '' }) {
-    const shipment = await prisma.shipment.findUnique({
-      where: { awbNumber },
-      include: { order: true }
-    });
+    const shipment = await Shipment.findOne({ awbNumber });
 
     if (!shipment) {
       throw new Error(`Shipment with AWB ${awbNumber} not found`);
+    }
+
+    const order = await Order.findById(shipment.orderId);
+    if (!order) {
+      throw new Error(`Order for shipment ${awbNumber} not found`);
     }
 
     const newCheckpoint = {
@@ -164,46 +154,32 @@ export const logisticsService = {
       targetOrderStatus = 'RTO_INITIATED';
     }
 
-    await prisma.$transaction(async (tx) => {
-      const updateData = {
-        currentStatus: normalizedStatus,
-        trackingHistory: updatedHistory
-      };
+    shipment.currentStatus = normalizedStatus;
+    shipment.trackingHistory = updatedHistory;
+    if (targetOrderStatus === 'DELIVERED') {
+      shipment.deliveredAt = new Date();
+    }
+    await shipment.save();
 
-      if (targetOrderStatus === 'DELIVERED') {
-        updateData.deliveredAt = new Date();
-      }
-
-      await tx.shipment.update({
-        where: { id: shipment.id },
-        data: updateData
-      });
-
-      // Advance order FSM if applicable
-      if (targetOrderStatus && targetOrderStatus !== shipment.order.status) {
-        if (fsmService.canTransition(shipment.order.status, targetOrderStatus)) {
-          const orderUpdateData = { status: targetOrderStatus };
-          if (targetOrderStatus === 'DELIVERED' && shipment.order.paymentMethod === 'COD') {
-            orderUpdateData.paymentStatus = 'PAID';
-          }
-
-          await tx.order.update({
-            where: { id: shipment.orderId },
-            data: orderUpdateData
-          });
-
-          await tx.orderHistory.create({
-            data: {
-              orderId: shipment.orderId,
-              fromState: shipment.order.status,
-              toState: targetOrderStatus,
-              actorRole: 'CARRIER_WEBHOOK',
-              note: `Carrier reported: ${notes || normalizedStatus} (${location})`
-            }
-          });
+    // Advance order FSM if applicable
+    if (targetOrderStatus && targetOrderStatus !== order.status) {
+      if (fsmService.canTransition(order.status, targetOrderStatus)) {
+        const oldState = order.status;
+        order.status = targetOrderStatus;
+        if (targetOrderStatus === 'DELIVERED' && order.paymentMethod === 'COD') {
+          order.paymentStatus = 'PAID';
         }
+
+        order.history.push({
+          fromState: oldState,
+          toState: targetOrderStatus,
+          actorRole: 'CARRIER_WEBHOOK',
+          note: `Carrier reported: ${notes || normalizedStatus} (${location})`
+        });
+
+        await order.save();
       }
-    });
+    }
 
     return { success: true, awbNumber, status: normalizedStatus };
   },
@@ -212,9 +188,7 @@ export const logisticsService = {
    * Get shipment by order ID
    */
   async getShipmentByOrderId(orderId) {
-    const shipment = await prisma.shipment.findUnique({
-      where: { orderId }
-    });
+    const shipment = await Shipment.findOne({ orderId });
 
     if (!shipment) {
       throw new Error('Shipment record not found for this order');
@@ -223,3 +197,5 @@ export const logisticsService = {
     return shipment;
   }
 };
+
+export default logisticsService;

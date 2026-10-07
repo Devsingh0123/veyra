@@ -1,4 +1,6 @@
-import prisma from '../prisma.js';
+import PaymentIntent from '../models/PaymentIntent.model.js';
+import WebhookEvent from '../models/WebhookEvent.model.js';
+import Refund from '../models/Refund.model.js';
 import { razorpayService } from './razorpay.service.js';
 
 export const paymentService = {
@@ -20,16 +22,14 @@ export const paymentService = {
       notes: { orderId, userId }
     });
 
-    // 2. Persist PaymentIntent in DB
-    const intent = await prisma.paymentIntent.create({
-      data: {
-        orderId,
-        userId,
-        razorpayOrderId: rzpOrder.id,
-        amountPaise,
-        currency: 'INR',
-        status: 'CREATED'
-      }
+    // 2. Persist PaymentIntent in MongoDB
+    const intent = await PaymentIntent.create({
+      orderId,
+      userId,
+      razorpayOrderId: rzpOrder.id,
+      amountPaise: amountPaise.toString(),
+      currency: 'INR',
+      status: 'CREATED'
     });
 
     return {
@@ -61,14 +61,17 @@ export const paymentService = {
     }
 
     // Update payment intent
-    const intent = await prisma.paymentIntent.update({
-      where: { razorpayOrderId },
-      data: {
-        razorpayPaymentId,
-        status: 'CAPTURED',
-        method: 'PREPAID'
-      }
-    });
+    const intent = await PaymentIntent.findOneAndUpdate(
+      { razorpayOrderId },
+      {
+        $set: {
+          razorpayPaymentId,
+          status: 'CAPTURED',
+          method: 'PREPAID'
+        }
+      },
+      { new: true }
+    );
 
     // Best-effort notification to order service
     const orderServiceUrl = process.env.ORDER_SERVICE_URL || 'http://localhost:3004';
@@ -91,7 +94,7 @@ export const paymentService = {
     return {
       success: true,
       status: 'CAPTURED',
-      paymentIntentId: intent.id,
+      paymentIntentId: intent ? intent.id : null,
       razorpayPaymentId
     };
   },
@@ -105,53 +108,49 @@ export const paymentService = {
     }
 
     // 1. Idempotency Check
-    const existing = await prisma.webhookEvent.findUnique({
-      where: { eventId }
-    });
-
+    const existing = await WebhookEvent.findOne({ eventId });
     if (existing) {
       return { duplicate: true, message: 'Event already processed' };
     }
 
-    // 2. Process based on event type
-    await prisma.$transaction(async (tx) => {
-      // Record event in ledger
-      await tx.webhookEvent.create({
-        data: {
-          eventId,
-          eventType,
-          payload: payload || {},
-          isProcessed: true
-        }
-      });
+    // 2. Record event in ledger
+    await WebhookEvent.create({
+      eventId,
+      eventType,
+      payload: payload || {},
+      isProcessed: true
+    });
 
-      if (eventType === 'payment.captured') {
-        const paymentEntity = payload?.payment?.entity;
-        const rzpOrderId = paymentEntity?.order_id;
-        const rzpPaymentId = paymentEntity?.id;
+    if (eventType === 'payment.captured') {
+      const paymentEntity = payload?.payment?.entity;
+      const rzpOrderId = paymentEntity?.order_id;
+      const rzpPaymentId = paymentEntity?.id;
 
-        if (rzpOrderId) {
-          await tx.paymentIntent.updateMany({
-            where: { razorpayOrderId: rzpOrderId },
-            data: {
+      if (rzpOrderId) {
+        await PaymentIntent.updateMany(
+          { razorpayOrderId: rzpOrderId },
+          {
+            $set: {
               razorpayPaymentId: rzpPaymentId,
               status: 'CAPTURED',
               method: paymentEntity?.method || 'PREPAID'
             }
-          });
-        }
-      } else if (eventType === 'payment.failed') {
-        const paymentEntity = payload?.payment?.entity;
-        const rzpOrderId = paymentEntity?.order_id;
-
-        if (rzpOrderId) {
-          await tx.paymentIntent.updateMany({
-            where: { razorpayOrderId: rzpOrderId },
-            data: { status: 'FAILED' }
-          });
-        }
+          }
+        );
       }
-    });
+    } else if (eventType === 'payment.failed') {
+      const paymentEntity = payload?.payment?.entity;
+      const rzpOrderId = paymentEntity?.order_id;
+
+      if (rzpOrderId) {
+        await PaymentIntent.updateMany(
+          { razorpayOrderId: rzpOrderId },
+          {
+            $set: { status: 'FAILED' }
+          }
+        );
+      }
+    }
 
     return { success: true, eventId, eventType };
   },
@@ -160,9 +159,7 @@ export const paymentService = {
    * Issue refund
    */
   async issueRefund({ paymentIntentId, amountPaise, reason = 'Customer refund' }) {
-    const intent = await prisma.paymentIntent.findUnique({
-      where: { id: paymentIntentId }
-    });
+    const intent = await PaymentIntent.findById(paymentIntentId);
 
     if (!intent) {
       throw new Error('Payment intent not found');
@@ -172,7 +169,7 @@ export const paymentService = {
       throw new Error(`Cannot refund payment with status "${intent.status}"`);
     }
 
-    const refundAmount = amountPaise ? BigInt(amountPaise) : intent.amountPaise;
+    const refundAmount = amountPaise ? BigInt(amountPaise) : BigInt(intent.amountPaise);
 
     // Call Razorpay API
     const rzpRefund = await razorpayService.createRefund({
@@ -182,30 +179,22 @@ export const paymentService = {
     });
 
     // Record in database
-    const refundRecord = await prisma.$transaction(async (tx) => {
-      const refund = await tx.refund.create({
-        data: {
-          paymentIntentId,
-          razorpayRefundId: rzpRefund.id,
-          amountPaise: refundAmount,
-          reason,
-          status: 'REFUNDED'
-        }
-      });
-
-      await tx.paymentIntent.update({
-        where: { id: paymentIntentId },
-        data: { status: 'REFUNDED' }
-      });
-
-      return refund;
+    const refund = await Refund.create({
+      paymentIntentId,
+      razorpayRefundId: rzpRefund.id,
+      amountPaise: refundAmount.toString(),
+      reason,
+      status: 'REFUNDED'
     });
+
+    intent.status = 'REFUNDED';
+    await intent.save();
 
     return {
       success: true,
-      refundId: refundRecord.id,
-      razorpayRefundId: refundRecord.razorpayRefundId,
-      amountPaise: refundRecord.amountPaise.toString()
+      refundId: refund.id,
+      razorpayRefundId: refund.razorpayRefundId,
+      amountPaise: refund.amountPaise.toString()
     };
   },
 
@@ -213,22 +202,21 @@ export const paymentService = {
    * Get payment details by Order ID
    */
   async getPaymentByOrderId(orderId) {
-    const intent = await prisma.paymentIntent.findFirst({
-      where: { orderId },
-      include: { refunds: true }
-    });
+    const intent = await PaymentIntent.findOne({ orderId }).populate('refunds');
 
     if (!intent) {
       throw new Error('Payment record not found for this order');
     }
 
-    return {
-      ...intent,
-      amountPaise: intent.amountPaise.toString(),
-      refunds: intent.refunds.map(r => ({
-        ...r,
-        amountPaise: r.amountPaise.toString()
-      }))
-    };
+    const intentObj = intent.toJSON();
+    intentObj.amountPaise = intent.amountPaise.toString();
+    intentObj.refunds = (intent.refunds || []).map(r => ({
+      ...r,
+      amountPaise: r.amountPaise ? r.amountPaise.toString() : '0'
+    }));
+
+    return intentObj;
   }
 };
+
+export default paymentService;

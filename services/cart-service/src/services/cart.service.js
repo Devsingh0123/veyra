@@ -1,5 +1,5 @@
 import redis from '../redis.js';
-import prisma from '../prisma.js';
+import Cart from '../models/Cart.model.js';
 
 const GUEST_CART_TTL = 14 * 24 * 60 * 60; // 14 days in seconds
 
@@ -57,18 +57,15 @@ export const cartService = {
   },
 
   // ==========================================
-  // USER CART (Prisma ORM)
+  // USER CART (MongoDB via Mongoose)
   // ==========================================
   async getUserCart(userId) {
-    let cart = await prisma.cart.findUnique({
-      where: { userId },
-      include: { items: true }
-    });
+    let cart = await Cart.findOne({ userId });
 
     if (!cart) {
-      cart = await prisma.cart.create({
-        data: { userId },
-        include: { items: true }
+      cart = await Cart.create({
+        userId,
+        items: []
       });
     }
 
@@ -81,57 +78,43 @@ export const cartService = {
     const existingItem = cart.items.find(i => i.variantId === variantId);
 
     if (existingItem) {
-      await prisma.cartItem.update({
-        where: { id: existingItem.id },
-        data: { quantity: existingItem.quantity + quantity }
-      });
+      existingItem.quantity += quantity;
     } else {
-      await prisma.cartItem.create({
-        data: {
-          cartId: cart.id,
-          variantId,
-          quantity
-        }
+      cart.items.push({
+        variantId,
+        quantity
       });
     }
 
-    return await this.getUserCart(userId);
+    await cart.save();
+    return cart;
   },
 
   async updateUserCart(userId, variantId, quantity) {
     const cart = await this.getUserCart(userId);
-    const item = cart.items.find(i => i.variantId === variantId);
+    const item = cart.items.find(i => i.variantId === variantId || i.id === variantId);
 
     if (!item) return cart;
 
     if (quantity <= 0) {
-      await prisma.cartItem.delete({ where: { id: item.id } });
+      cart.items = cart.items.filter(i => i.variantId !== variantId && i.id !== variantId);
     } else {
-      await prisma.cartItem.update({
-        where: { id: item.id },
-        data: { quantity }
-      });
+      item.quantity = quantity;
     }
 
-    return await this.getUserCart(userId);
+    await cart.save();
+    return cart;
   },
 
   async removeFromUserCart(userId, variantId) {
     const cart = await this.getUserCart(userId);
-    const item = cart.items.find(i => i.variantId === variantId);
-
-    if (item) {
-      await prisma.cartItem.delete({ where: { id: item.id } });
-    }
-
-    return await this.getUserCart(userId);
+    cart.items = cart.items.filter(i => i.variantId !== variantId && i.id !== variantId);
+    await cart.save();
+    return cart;
   },
 
   async clearUserCart(userId) {
-    const cart = await prisma.cart.findUnique({ where: { userId } });
-    if (cart) {
-      await prisma.cartItem.deleteMany({ where: { cartId: cart.id } });
-    }
+    await Cart.findOneAndUpdate({ userId }, { $set: { items: [] } });
     return { items: [] };
   },
 
@@ -156,3 +139,5 @@ export const cartService = {
     return await this.getUserCart(userId);
   }
 };
+
+export default cartService;

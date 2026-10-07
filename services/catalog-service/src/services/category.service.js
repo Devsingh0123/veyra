@@ -1,4 +1,4 @@
-import prisma from '../prisma.js';
+import Category from '../models/Category.model.js';
 
 function toSlug(text) {
   return text.toLowerCase().trim().replace(/\s+/g, '-').replace(/[^\w\-]+/g, '');
@@ -6,38 +6,34 @@ function toSlug(text) {
 
 export const categoryService = {
   async getCategories() {
-    const categories = await prisma.category.findMany({
-      where: { isActive: true },
-      include: { children: true },
-      orderBy: { name: 'asc' }
-    });
+    const categories = await Category.find({ isActive: true })
+      .populate('children')
+      .sort({ name: 1 });
     // Return root categories with nested children
     return categories.filter(c => !c.parentId);
   },
 
   async getCategoryBySlug(slug) {
-    const category = await prisma.category.findUnique({
-      where: { slug },
-      include: { children: true, products: true }
-    });
+    const category = await Category.findOne({ slug })
+      .populate('children')
+      .populate('products');
+
     if (!category) throw new Error('Category not found');
     return category;
   },
 
   async createCategory({ name, description, parentId }) {
     let slug = toSlug(name);
-    const existing = await prisma.category.findUnique({ where: { slug } });
+    const existing = await Category.findOne({ slug });
     if (existing) {
       slug = `${slug}-${Date.now().toString().slice(-4)}`;
     }
 
-    return await prisma.category.create({
-      data: {
-        name: name.trim(),
-        slug,
-        description: description || null,
-        parentId: parentId || null
-      }
+    return await Category.create({
+      name: name.trim(),
+      slug,
+      description: description || null,
+      parentId: parentId || null
     });
   },
 
@@ -50,9 +46,15 @@ export const categoryService = {
     if (description !== undefined) data.description = description;
     if (isActive !== undefined) data.isActive = isActive;
 
-    return await prisma.category.update({
-      where: { id },
-      data
-    });
+    const updated = await Category.findByIdAndUpdate(
+      id,
+      { $set: data },
+      { new: true }
+    );
+
+    if (!updated) throw new Error('Category not found');
+    return updated;
   }
 };
+
+export default categoryService;
